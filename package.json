@@ -1,0 +1,14 @@
+{
+  "name": "claude-agent-monitor",
+  "version": "1.0.0",
+  "description": "MCP Server for monitoring Claude Desktop agent status",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "watch": "node watch.js",
+    "install-config": "node install.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1"
+  }
+}
