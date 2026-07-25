@@ -62,21 +62,37 @@ function getMeta(fp, sid) {
   return meta;
 }
 
-// 读尾部推断当前处于什么阶段
+// 读尾部推断当前处于什么阶段。返回 { activity, done }
+// done=true 表示这一轮已结束（AI 已回复完 end_turn 或用户消息尚未被处理之外的收尾），
+// 用于避免把「已处理完」误显示成「AI 回复中」。
 function getActivity(fp, size) {
   try {
     const lines = readTail(fp, size).split("\n").filter(Boolean);
+    // 从后往前找第一条“实质消息”（assistant / user），跳过 last-prompt /
+    // custom-title / ai-title / mode 等收尾元数据行——它们常追加在会话末尾，
+    // 是“本轮已结束”的信号，而不是还在运行。
     for (let i = lines.length - 1; i >= 0; i--) {
       let o; try { o = JSON.parse(lines[i]); } catch { continue; }
-      if (o.type === "assistant") return "AI 回复中";
+
+      if (o.type === "assistant" && o.message) {
+        const stop = o.message.stop_reason;
+        if (stop === "tool_use") return { activity: "调用工具", done: false };
+        if (stop === "end_turn" || stop === "stop_sequence" || stop === "max_tokens")
+          return { activity: "已回复", done: true };
+        // stop_reason 为 null / 缺失：多为流式写入中，确实在生成
+        return { activity: "AI 回复中", done: false };
+      }
+
       if (o.type === "user" && o.message) {
-        const t = extractText(o.message.content);
-        // 工具结果回填也是 user，粗略区分
-        return t && !t.startsWith("[") ? "等待 AI" : "工具执行中";
+        const c = o.message.content;
+        // 工具结果回填也是 user 消息，content 里是 tool_result
+        const isToolResult = Array.isArray(c) && c.some((x) => x.type === "tool_result");
+        if (isToolResult) return { activity: "工具执行中", done: false };
+        return { activity: "等待 AI", done: false }; // 用户刚发消息，等 AI 接手
       }
     }
   } catch {}
-  return "";
+  return { activity: "", done: false };
 }
 
 // ── 扫描所有 session，返回活跃列表 ────────────────────
@@ -99,9 +115,22 @@ function scan() {
 
       const sid = fn.replace(/\.jsonl$/, "");
       const meta = getMeta(fp, sid);
-      let state, activity = "";
-      if (ageSec < WORKING_SEC) { state = "WORKING"; activity = getActivity(fp, fst.size); }
-      else state = "RECENT";
+
+      // 先读尾部判断这一轮是否已结束
+      const act = getActivity(fp, fst.size);
+
+      let state, activity = act.activity;
+      if (ageSec < WORKING_SEC && !act.done) {
+        // 文件刚动过，且本轮尚未结束 —— 确实在运行
+        state = "WORKING";
+      } else if (act.done) {
+        // 本轮已结束（AI 回复完）—— 显示为已完成，而非“正在运行”
+        state = "DONE";
+      } else {
+        // 30s~5min 内动过但读不出明确结束标志
+        state = "RECENT";
+        activity = "";
+      }
 
       rows.push({
         sid, state, ageSec, activity,
@@ -139,6 +168,7 @@ function render(rows) {
   for (const r of rows.slice(0, MAX_ROWS)) {
     let dot, label, color;
     if (r.state === "WORKING") { dot = "●"; label = "WORKING"; color = C.green; }
+    else if (r.state === "DONE") { dot = "✓"; label = "DONE   "; color = C.cyan; }
     else { dot = "◐"; label = "RECENT "; color = C.yellow; }
 
     const age = fmtAge(r.ageSec).padStart(4);
@@ -148,7 +178,7 @@ function render(rows) {
     out += `            ${sub.join("  ")}\n`;
   }
 
-  out += `\n${C.dim}每 ${REFRESH_MS / 1000}s 刷新 · 判活纯靠 .jsonl 文件修改时间 · Ctrl+C 退出${C.reset}\n`;
+  out += `\n${C.dim}每 ${REFRESH_MS / 1000}s 刷新 · ●运行中 ✓已回复 ◐近期 · Ctrl+C 退出${C.reset}\n`;
   process.stdout.write(out);
 }
 
