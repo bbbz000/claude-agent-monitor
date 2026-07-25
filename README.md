@@ -1,116 +1,102 @@
 # Claude Agent Monitor
 
-一个基于 MCP（Model Context Protocol）的 Claude Desktop Agent 状态监控工具。通过在终端实时显示 Claude 的工作状态（Working / Idle），让你随时掌握 Agent 是否正在处理任务。
+实时监控本地 **Claude Code / Claude Desktop agent 会话**的状态——在终端面板里看到当前有哪些 agent 正在运行、各自在忙什么，无需任何 MCP 配置或让 Claude 主动上报。
 
 ## 工作原理
 
+Claude Code / Desktop 的每个 agent 会话都以 `.jsonl` 文件明文存在本地：
+
 ```
-Claude Desktop  ──MCP──>  server.js  ──写入──>  status.json  <──监听──  watch.js（终端面板）
+~/.claude/projects/<项目目录>/<sessionId>.jsonl
 ```
 
-1. `server.js` 作为 MCP Server 运行，向 Claude Desktop 暴露 `task_start` 和 `task_end` 两个工具
-2. Claude 在处理用户请求时调用这些工具，状态被写入 `status.json`
-3. `watch.js` 监听文件变化，在终端实时显示状态更新
-4. 如果 5 分钟内无活动，自动切换为 idle 状态
+会话每产生一条消息，对应文件就被写入一次。本工具**纯靠扫描这些文件的修改时间（mtime）来判断 agent 是否活跃**——被动观测，零侵入，不依赖任何上报机制。
+
+```
+~/.claude/projects/**/*.jsonl  ──扫描 mtime──>  monitor.js（终端面板）
+```
+
+判活规则：
+
+| 距最后修改 | 状态 | 含义 |
+|-----------|------|------|
+| < 30 秒 | ● WORKING | 正在运行 |
+| 30 秒 ~ 5 分钟 | ◐ RECENT | 刚停下 |
+| > 5 分钟 | （不显示） | 视为空闲 |
+
+对 WORKING 的会话，还会读取文件尾部，区分当前处于 **AI 回复中 / 工具执行中 / 等待 AI**。
 
 ## 文件结构
 
 ```
 claude-agent-monitor/
-├── server.js        # MCP Server，提供 task_start / task_end 工具
-├── watch.js         # 终端 Watcher，实时显示状态
-├── install.js       # 安装脚本，自动注册到 Claude Desktop 配置
-├── status.json      # 状态文件（运行时自动生成/更新）
+├── monitor.js      # 多 agent 实时终端面板（主程序）
+├── sessions.js     # 列出全部历史 session
+├── start.bat       # Windows 一键启动
 ├── package.json
-└── node_modules/
+└── README.md
 ```
 
-## 安装与使用
+## 使用
 
 ### 前置条件
 
-- Node.js >= 18
-- Claude Desktop 已安装
+- Node.js >= 18（仅用内置模块，**无第三方依赖，无需 npm install**）
 
-### 步骤
+### 启动实时监控面板
 
-1. **安装依赖**
-
-```bash
-npm install
-```
-
-2. **注册 MCP Server 到 Claude Desktop**
+**Windows：** 双击 `start.bat`，或：
 
 ```bash
-npm run install-config
+npm run monitor
 ```
 
-该命令会自动将 `agent-monitor` 写入 Claude Desktop 的配置文件：
-`%APPDATA%\Claude\claude_desktop_config.json`
+面板每 2 秒刷新一次，`Ctrl+C` 退出。显示效果：
 
-3. **重启 Claude Desktop**
+```
+╔═══════════════════════════════════════════════════════════╗
+║  Claude Agent Monitor          活跃 agent 实时状态         ║
+╚═══════════════════════════════════════════════════════════╝
+18:41:34   共 3 个近期活跃 · 1 个正在运行
 
-4. **启动终端监控面板**
+● WORKING    2s前  claude-agent-monitor project overview
+            70e89c0e  C:/Users/Administrator/Desktop/AI  AI 回复中
+◐ RECENT     1m前  WorldMapMarchData performance test
+            5b3b5b3a  C:/workspace/LDLProject/...
+◐ RECENT     3m前  @Assets/.claude/commands/ai-review.md
+            b4a6fa40  C:/workspace/LDLProject/...
+```
+
+每个 agent 一行，显示：状态、距上次活动的时间、会话标题、sessionId 前 8 位、所在项目路径、当前活动。
+
+### 列出历史 session
 
 ```bash
-npm run watch
+npm run sessions              # 列出最近 30 个
+node sessions.js --limit 50   # 指定数量
+node sessions.js --json       # 输出 JSON（供程序 / 硬件消费）
+node sessions.js --project LDL   # 按项目路径过滤
 ```
 
-5. **（推荐）添加 Custom Instructions**
+## 配置
 
-在 Claude Desktop 的 Settings > Custom Instructions 中添加：
+在 `monitor.js` 顶部可调：
 
-> Every time you begin processing a user request, call the task_start tool first. When you finish, call task_end.
-
-这样 Claude 会在每次处理请求时自动调用状态上报工具。
-
-## MCP 工具说明
-
-| 工具 | 说明 | 参数 |
+| 常量 | 默认 | 说明 |
 |------|------|------|
-| `task_start` | 任务开始时调用，状态变为 "working" | `description` — 任务简要描述 |
-| `task_end` | 任务结束时调用，状态变为 "idle" | `summary` — 完成内容摘要 |
+| `WORKING_SEC` | 30 | 小于此秒数视为正在运行 |
+| `RECENT_SEC` | 300 | 超过此秒数不再显示 |
+| `REFRESH_MS` | 2000 | 面板刷新间隔（毫秒） |
+| `MAX_ROWS` | 15 | 最多显示多少个 agent |
 
-## 终端显示效果
+## 扩展：对接硬件 / 其他前端
 
-```
-╔══════════════════════════════════════╗
-║   Claude Agent Monitor - Watcher    ║
-╚══════════════════════════════════════╝
+核心是 `sessions.js` 导出的 `listSessions()` 与 `monitor.js` 内的 `scan()`——它们产出的都是**纯数据数组**。要接硬件（如外设指示灯）或做 Web 面板，无需改判活逻辑，只需在外层套一层输出，例如：
 
-[12:00:01] ○ IDLE     MCP Server started, waiting for tasks
-[12:00:15] ● WORKING  分析用户提交的代码并给出优化建议
-[12:01:02] ○ IDLE     已完成代码分析，给出了 3 条优化建议
-```
+- **HTTP：** 加一个 `http.createServer`，`GET /agents` 返回 `JSON.stringify(scan())`，硬件轮询即可
+- **串口 / USB：** 把 `scan()` 结果序列化后写串口，推给 MCU
 
-## status.json 格式
+## 说明
 
-```json
-{
-  "state": "working",
-  "message": "当前任务描述",
-  "time": "2026-07-24T04:02:17.664Z"
-}
-```
-
-| 字段 | 说明 |
-|------|------|
-| `state` | `"working"` 或 `"idle"` |
-| `message` | 任务描述或完成摘要 |
-| `time` | ISO 8601 时间戳 |
-
-## npm scripts
-
-| 命令 | 说明 |
-|------|------|
-| `npm start` | 启动 MCP Server（通常由 Claude Desktop 自动调用） |
-| `npm run watch` | 启动终端状态监控面板 |
-| `npm run install-config` | 将 MCP Server 注册到 Claude Desktop 配置 |
-
-## 技术栈
-
-- **MCP SDK** — `@modelcontextprotocol/sdk ^1.12.1`
-- **运行时** — Node.js（ESM）
-- **状态持久化** — 文件系统（`status.json`）
-- **文件监听** — `fs.watch`（Node.js 原生）
+- 本工具只**读取**本地会话文件，不修改、不上传任何内容。
+- 仅覆盖存在本地的 agent 会话（Claude Code / Desktop agent 模式）。claude.ai 普通网页对话的数据在服务器上，不在本工具范围内。

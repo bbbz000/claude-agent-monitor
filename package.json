@@ -1,14 +1,10 @@
 {
   "name": "claude-agent-monitor",
-  "version": "1.0.0",
-  "description": "MCP Server for monitoring Claude Desktop agent status",
+  "version": "2.0.0",
+  "description": "实时监控本地 Claude Code / Desktop agent 会话状态（扫描 ~/.claude/projects 下的 .jsonl，无需 MCP）",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "watch": "node watch.js",
-    "install-config": "node install.js"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.1"
+    "monitor": "node monitor.js",
+    "sessions": "node sessions.js"
   }
 }
