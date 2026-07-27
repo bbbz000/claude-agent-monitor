@@ -113,7 +113,7 @@ npm run bar
 - **设置…** —— 取色器自定义四种状态颜色、圆点上限、阈值、小条背景
 - **退出**
 
-> ⚠️ 这是 Electron 的置顶悬浮窗「贴」在桌面/任务栏上，不是真正的任务栏嵌入（真嵌入需 C++ hack 任务栏窗口）。默认用不透明胶囊窗（真透明置顶窗在部分 Windows 上不合成会整窗看不见；想试真透明可 `electron . --transparent`）。看不见时可用 `start-bar-debug.bat` 诊断。设置存在 `%APPDATA%/claude-agent-monitor/config.json`。
+> ⚠️ 这是 Electron 的置顶悬浮窗「贴」在桌面/任务栏上，不是真正的任务栏嵌入（真嵌入需 C++ hack 任务栏窗口）。默认用**真透明窗**（胶囊只包住圆点、其余全透），并自动关闭 GPU 硬件合成——这是真透明窗在部分 Windows 上「整窗看不见」的根因，走软件合成路径后透明可靠生效。若仍看不见，可用 `start-bar.bat` 换 `--opaque` 退回不透明深色胶囊，或用 `start-bar-debug.bat` 诊断。小条会每 0.6s 自动重新置顶，防止任务栏抢层级把它盖住。设置存在 `%APPDATA%/claude-agent-monitor/config.json`。
 
 ### 列出历史 session
 

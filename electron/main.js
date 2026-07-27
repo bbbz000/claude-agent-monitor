@@ -9,9 +9,17 @@ import { load, save, resolveDisplay } from "./config.js";
 const DIR = import.meta.dirname;
 const DEV = process.argv.includes("--dev");
 const DIAG = process.argv.includes("--diag"); // 诊断模式：亮紫底+日志，用于排查“看不见”
-// 默认用不透明胶囊窗（真透明窗在部分 Windows 上不合成→整窗看不见）。
-// 想试真透明可加 --transparent。
-const TRANSPARENT = process.argv.includes("--transparent");
+// 默认用真透明窗（胶囊只包住圆点、其余全透，barBackground 的 alpha 直接生效）。
+// 之前“整窗看不见”是 GPU 合成把透明窗吞了 → 下面用 --disable-gpu-compositing 兜底。
+// 想退回纯不透明胶囊：--opaque。
+const OPAQUE = process.argv.includes("--opaque");
+const TRANSPARENT = !OPAQUE && !DIAG;
+
+// 关掉 GPU 合成：这是真透明窗在部分 Win 上整窗不显示的根因；软件合成路径下透明可靠生效。
+// 仅透明模式需要；不透明/诊断模式保持默认硬件加速。
+if (TRANSPARENT) {
+  app.disableHardwareAcceleration();
+}
 
 // 不透明模式下的窗口底色 = 胶囊深色（与 renderer 的胶囊背景观感一致）
 const OPAQUE_BG = "#1b1b24";
@@ -29,6 +37,7 @@ let barWin = null;
 let settingsWin = null;
 let tray = null;
 let scanTimer = null;
+let topTimer = null;           // 置顶守护定时器
 let programmaticMove = false; // true 时的 moved 事件由程序触发，非用户拖动，需忽略
 
 // ── 定位：把小条贴到目标显示器的任务栏带 ───────────────
@@ -109,7 +118,7 @@ function createBar() {
   barWin = new BrowserWindow({
     width: barWidth(config.maxDots),
     height: BAR_HEIGHT,
-    transparent: TRANSPARENT && !DIAG, // 默认不透明（真透明窗在部分 Win 上不合成）
+    transparent: TRANSPARENT, // 默认真透明（已关 GPU 合成兜底，避免整窗不显示）
     frame: false,
     alwaysOnTop: true,
     skipTaskbar: true,
@@ -118,7 +127,7 @@ function createBar() {
     focusable: true,    // 可拖动窗口需可获焦
     hasShadow: false,
     show: false,
-    // 诊断=亮紫；透明模式=全透明底；默认=胶囊深色底
+    // 诊断=亮紫；透明模式=全透明底(桌面透出)；不透明=胶囊深色底
     backgroundColor: DIAG ? "#ff00ff" : (TRANSPARENT ? "#00000000" : OPAQUE_BG),
     webPreferences: {
       preload: path.join(DIR, "preload.cjs"),
@@ -158,6 +167,18 @@ function createBar() {
   if (DEV) barWin.webContents.openDevTools({ mode: "detach" });
 }
 
+// ── 置顶守护 ─────────────────────────────────────────
+// Win11 任务栏会周期性抢到最顶层，把贴在其上方的小条盖住。
+// alwaysOnTop 一次性设置不足以对抗，故每轮扫描重新提顶（开销极小）。
+function keepOnTop() {
+  if (!barWin || barWin.isDestroyed()) return;
+  if (!barWin.isVisible()) return;
+  try {
+    barWin.setAlwaysOnTop(true, "screen-saver");
+    barWin.moveTop();
+  } catch {}
+}
+
 // ── 扫描 → 只推 state 数组（隐私/性能：不传标题/路径）────
 function tick() {
   if (!barWin || barWin.isDestroyed()) return;
@@ -174,12 +195,16 @@ function tick() {
 function startScanLoop() {
   if (scanTimer) clearInterval(scanTimer);
   scanTimer = setInterval(tick, config.refreshMs);
+  // 置顶守护单独跑更快的定时器（纯内存操作，与磁盘扫描解耦），
+  // 让被任务栏盖住后能在 ~600ms 内恢复，而不必把扫描频率也提高。
+  if (topTimer) clearInterval(topTimer);
+  topTimer = setInterval(keepOnTop, 600);
 }
 
 function pushConfig() {
   if (barWin && !barWin.isDestroyed()) {
-    // opaque 标志让 renderer 知道当前是不透明窗（四角需铺满、不留圆角露底）
-    barWin.webContents.send("config:update", { ...config, opaque: !(TRANSPARENT && !DIAG) });
+    // opaque：纯不透明窗（四角需铺满、不留圆角露底）；透明窗则 false
+    barWin.webContents.send("config:update", { ...config, opaque: !TRANSPARENT });
   }
 }
 
@@ -367,4 +392,5 @@ app.on("window-all-closed", (e) => {
 
 app.on("before-quit", () => {
   if (scanTimer) clearInterval(scanTimer);
+  if (topTimer) clearInterval(topTimer);
 });
