@@ -1,6 +1,9 @@
 # Claude Agent Monitor
 
-实时监控本地 **Claude Code / Claude Desktop agent 会话**的状态——在终端面板里看到当前有哪些 agent 正在运行、各自在忙什么，无需任何 MCP 配置或让 Claude 主动上报。
+实时监控本地 **Claude Code / Claude Desktop agent 会话**的状态，无需任何 MCP 配置或让 Claude 主动上报。提供两种前端：
+
+- **终端面板**（`monitor.js`）：完整列表，看每个 agent 的标题、项目、当前活动。零依赖。
+- **任务栏悬浮小条**（`electron/`）：贴在任务栏上的一排圆点，1 个圆点 = 1 个活跃 agent，颜色代表状态——像红绿灯，一眼扫过。需 Electron。
 
 ## 工作原理
 
@@ -30,9 +33,19 @@ Claude Code / Desktop 的每个 agent 会话都以 `.jsonl` 文件明文存在�
 
 ```
 claude-agent-monitor/
-├── monitor.js      # 多 agent 实时终端面板（主程序）
+├── core/
+│   └── scanner.js  # 判活核心：扫描 .jsonl、推断状态（终端版与小条版共享）
+├── monitor.js      # 多 agent 实时终端面板
 ├── sessions.js     # 列出全部历史 session
-├── start.bat       # Windows 一键启动
+├── electron/       # 任务栏悬浮小条（Electron）
+│   ├── main.js         # 主进程：建窗 + 定时扫描 + 多屏定位 + 拖动 + 托盘菜单
+│   ├── preload.cjs     # 安全桥（contextIsolation）
+│   ├── renderer.*      # 小条 UI：画圆点 / 折叠 / 上色
+│   ├── settings.*      # 设置窗口（取色器 + 阈值）
+│   └── config.js       # 配置读写
+├── start.bat           # 一键启动终端面板
+├── start-bar.bat       # 一键启动任务栏小条（首次会自动 npm install）
+├── start-bar-debug.bat # 诊断模式启动小条（看不见时用：亮底 + DevTools + 日志）
 ├── package.json
 └── README.md
 ```
@@ -41,7 +54,8 @@ claude-agent-monitor/
 
 ### 前置条件
 
-- Node.js >= 18（仅用内置模块，**无第三方依赖，无需 npm install**）
+- **终端面板**：Node.js >= 18（仅用内置模块，**无第三方依赖，无需 npm install**）
+- **任务栏小条**：额外需要 Electron（`start-bar.bat` 首次运行会自动 `npm install`）
 
 ### 启动实时监控面板
 
@@ -69,6 +83,38 @@ npm run monitor
 
 每个 agent 一行，显示：状态、距上次活动的时间、会话标题、sessionId 前 8 位、所在项目路径、当前活动。
 
+### 任务栏悬浮小条
+
+贴在任务栏上的一排圆点，每个圆点是一个活跃 agent，颜色代表状态：
+
+| 颜色（默认） | 状态 | 含义 |
+|------------|------|------|
+| 🟢 绿 | WORKING | 正在运行（会呼吸闪烁） |
+| 🔵 青 | DONE | 本轮已回复 |
+| 🟡 黄 | RECENT | 近期活动过 |
+| ⚫ 灰 | EMPTY | 无活跃 agent 时的占位点 |
+
+圆点超过上限（默认 12）折叠成 `…+N`。所有颜色都可在设置里改（想要单色就把几个状态设成同色）。
+
+**Windows：** 双击 `start-bar.bat`（首次会自动 `npm install` 安装 Electron），或：
+
+```bash
+npm run bar
+```
+
+**拖动小条**：直接用左键按住小条拖到屏幕任意位置即可；拖过之后进入「自由位置」模式，会记住坐标，下次启动回到原处。想恢复自动贴任务栏，从托盘菜单 →「位置」里选任一「贴任务栏…」选项。
+
+**菜单从托盘图标打开**（左键单击或右键托盘图标；小条本身右键已禁用，避免弹出 Windows 系统窗口菜单）：
+
+- **选择显示器** —— 主显示器 / 各副屏之间切换（贴任务栏模式下生效）
+- **位置** —— 自由拖动 / 贴任务栏（右下·不压任务栏 / 右下 / 底部居中 / 左下）
+- **位置微调** —— 上下左右各 10px 推移，重置
+- **活跃阈值** —— 1 / 2 / 5 / 10 分钟（超过则不再显示）
+- **设置…** —— 取色器自定义四种状态颜色、圆点上限、阈值、小条背景
+- **退出**
+
+> ⚠️ 这是 Electron 的置顶悬浮窗「贴」在桌面/任务栏上，不是真正的任务栏嵌入（真嵌入需 C++ hack 任务栏窗口）。默认用不透明胶囊窗（真透明置顶窗在部分 Windows 上不合成会整窗看不见；想试真透明可 `electron . --transparent`）。看不见时可用 `start-bar-debug.bat` 诊断。设置存在 `%APPDATA%/claude-agent-monitor/config.json`。
+
 ### 列出历史 session
 
 ```bash
@@ -80,7 +126,7 @@ node sessions.js --project LDL   # 按项目路径过滤
 
 ## 配置
 
-在 `monitor.js` 顶部可调：
+**终端面板**：在 `monitor.js` 顶部可调：
 
 | 常量 | 默认 | 说明 |
 |------|------|------|
@@ -89,12 +135,16 @@ node sessions.js --project LDL   # 按项目路径过滤
 | `REFRESH_MS` | 2000 | 面板刷新间隔（毫秒） |
 | `MAX_ROWS` | 15 | 最多显示多少个 agent |
 
+**任务栏小条**：改托盘菜单「设置…」即可，或直接编辑 `%APPDATA%/claude-agent-monitor/config.json`（`displayId` / `position` / `freePos`（自由拖动坐标）/ `offset` / `colors` / `maxDots` / `workingSec` / `recentSec` / `barBackground` / `refreshMs`）。
+
 ## 扩展：对接硬件 / 其他前端
 
-核心是 `sessions.js` 导出的 `listSessions()` 与 `monitor.js` 内的 `scan()`——它们产出的都是**纯数据数组**。要接硬件（如外设指示灯）或做 Web 面板，无需改判活逻辑，只需在外层套一层输出，例如：
+核心是 `core/scanner.js` 导出的 `scan()` 与 `sessions.js` 导出的 `listSessions()`——它们产出的都是**纯数据数组**（`scanner.js` 零副作用，可直接 `import { scan } from "./core/scanner.js"`）。要接硬件（如外设指示灯）或做 Web 面板，无需改判活逻辑，只需在外层套一层输出，例如：
 
 - **HTTP：** 加一个 `http.createServer`，`GET /agents` 返回 `JSON.stringify(scan())`，硬件轮询即可
 - **串口 / USB：** 把 `scan()` 结果序列化后写串口，推给 MCU
+
+任务栏小条（`electron/main.js`）本身就是这个模式的一个实例：它 `import` 同一个 `scan()`，只把 `state` 数组推给渲染层。
 
 ## 说明
 

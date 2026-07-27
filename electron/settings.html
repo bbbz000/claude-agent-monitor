@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font: 13px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif;
+      margin: 0; padding: 20px;
+      background: #1e1e2e; color: #e5e7eb;
+    }
+    h1 { font-size: 15px; margin: 0 0 16px; font-weight: 600; }
+    h2 { font-size: 12px; margin: 18px 0 8px; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.5px; }
+    .row { display: flex; align-items: center; justify-content: space-between; margin: 8px 0; }
+    .row label { flex: 1; }
+    input[type="color"] {
+      width: 44px; height: 26px; border: 1px solid #3f3f5a; border-radius: 6px;
+      background: none; padding: 0; cursor: pointer;
+    }
+    input[type="number"], input[type="text"] {
+      width: 120px; background: #2a2a3c; border: 1px solid #3f3f5a; color: #e5e7eb;
+      border-radius: 6px; padding: 5px 8px; font: inherit;
+    }
+    .swatch { display: flex; align-items: center; gap: 8px; }
+    .swatch code { color: #9ca3af; font-size: 11px; min-width: 62px; }
+    .actions { display: flex; gap: 10px; margin-top: 24px; }
+    button {
+      flex: 1; padding: 9px; border-radius: 7px; border: none; cursor: pointer;
+      font: 600 13px inherit;
+    }
+    .save { background: #22c55e; color: #06210f; }
+    .cancel { background: #3f3f5a; color: #e5e7eb; }
+    .hint { font-size: 11px; color: #6b7280; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Claude Agent Monitor · 设置</h1>
+
+  <h2>状态颜色</h2>
+  <div class="row"><label>正在运行 (WORKING)</label>
+    <div class="swatch"><code id="c-WORKING-hex"></code><input type="color" id="c-WORKING" /></div></div>
+  <div class="row"><label>已回复 (DONE)</label>
+    <div class="swatch"><code id="c-DONE-hex"></code><input type="color" id="c-DONE" /></div></div>
+  <div class="row"><label>近期 (RECENT)</label>
+    <div class="swatch"><code id="c-RECENT-hex"></code><input type="color" id="c-RECENT" /></div></div>
+  <div class="row"><label>无活跃占位 (EMPTY)</label>
+    <div class="swatch"><code id="c-EMPTY-hex"></code><input type="color" id="c-EMPTY" /></div></div>
+  <div class="hint">想要单色？把四个颜色设成同一个即可。</div>
+
+  <h2>圆点</h2>
+  <div class="row"><label>最多显示圆点数（超出折叠 …+N）</label>
+    <input type="number" id="maxDots" min="1" max="50" /></div>
+
+  <h2>活跃阈值（秒）</h2>
+  <div class="row"><label>WORKING：小于此秒数视为正在运行</label>
+    <input type="number" id="workingSec" min="1" max="3600" /></div>
+  <div class="row"><label>RECENT：超过此秒数不再显示</label>
+    <input type="number" id="recentSec" min="5" max="86400" /></div>
+
+  <h2>外观</h2>
+  <div class="row"><label>小条背景（CSS 颜色，transparent 可关闭）</label>
+    <input type="text" id="barBackground" /></div>
+
+  <div class="actions">
+    <button class="cancel" id="cancel">取消</button>
+    <button class="save" id="save">保存</button>
+  </div>
+
+  <script src="settings.js"></script>
+</body>
+</html>

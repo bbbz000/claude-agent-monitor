@@ -1,0 +1,70 @@
+/* electron/renderer.css — 透明小条 UI */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: transparent;   /* 关键：让窗口透明生效 */
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+/* 不透明窗模式：胶囊铺满整窗、去圆角，避免圆角处露出窗口底色方块 */
+body.opaque #bar {
+  border-radius: 0;
+}
+
+#bar {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 胶囊背景由 JS 按 config.barBackground 设置到 --bar-bg */
+  background: var(--bar-bg, rgba(0, 0, 0, 0.35));
+  border-radius: 17px;
+  -webkit-app-region: drag;   /* 整条可拖：左键按住即可移动小条 */
+  cursor: move;
+}
+
+/* 圆点/文字随整条一起拖（右键弹菜单不受 drag 影响） */
+#dots { -webkit-app-region: drag; }
+
+#dots {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+}
+
+.dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--c, #6b7280);
+  flex: 0 0 auto;
+  transition: background-color 0.2s ease;
+  box-shadow: 0 0 4px var(--c, transparent);
+}
+
+/* WORKING 圆点轻微呼吸，强调“正在运行” */
+.dot.working {
+  animation: pulse 1.4s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--c); }
+  50% { opacity: 0.55; box-shadow: 0 0 9px var(--c); }
+}
+
+.more {
+  font: 600 11px/1 -apple-system, "Segoe UI", system-ui, sans-serif;
+  color: #e5e7eb;
+  white-space: nowrap;
+  padding-left: 2px;
+}
+
+.dot.empty {
+  opacity: 0.55;
+}
