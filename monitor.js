@@ -10,6 +10,7 @@ const C = {
   reset: "\x1b[0m", dim: "\x1b[2m", bold: "\x1b[1m",
   red: "\x1b[31m", green: "\x1b[32m", yellow: "\x1b[33m",
   cyan: "\x1b[36m", gray: "\x1b[90m", white: "\x1b[37m",
+  magenta: "\x1b[35m",
 };
 
 // ── 渲染 ─────────────────────────────────────────────
@@ -27,7 +28,10 @@ function render(rows) {
   out += `${C.cyan}${C.bold}╚═══════════════════════════════════════════════════════════╝${C.reset}\n`;
 
   const working = rows.filter((r) => r.state === "WORKING").length;
-  out += `${C.dim}${now}   共 ${rows.length} 个近期活跃 · ${C.reset}${C.green}${working} 个正在运行${C.reset}\n\n`;
+  const waiting = rows.filter((r) => r.state === "WAITING").length;
+  out += `${C.dim}${now}   共 ${rows.length} 个近期活跃 · ${C.reset}${C.green}${working} 个正在运行${C.reset}`;
+  if (waiting) out += ` ${C.magenta}· ${waiting} 个等你确认${C.reset}`;
+  out += `\n\n`;
 
   if (rows.length === 0) {
     out += `${C.gray}   （近 5 分钟内没有活跃的 agent）${C.reset}\n`;
@@ -35,7 +39,8 @@ function render(rows) {
 
   for (const r of rows.slice(0, MAX_ROWS)) {
     let dot, label, color;
-    if (r.state === "WORKING") { dot = "●"; label = "WORKING"; color = C.green; }
+    if (r.state === "WAITING") { dot = "◆"; label = "WAITING"; color = C.magenta; }
+    else if (r.state === "WORKING") { dot = "●"; label = "WORKING"; color = C.green; }
     else if (r.state === "DONE") { dot = "✓"; label = "DONE   "; color = C.cyan; }
     else { dot = "◐"; label = "RECENT "; color = C.yellow; }
 
@@ -46,7 +51,7 @@ function render(rows) {
     out += `            ${sub.join("  ")}\n`;
   }
 
-  out += `\n${C.dim}每 ${REFRESH_MS / 1000}s 刷新 · ●运行中 ✓已回复 ◐近期 · Ctrl+C 退出${C.reset}\n`;
+  out += `\n${C.dim}每 ${REFRESH_MS / 1000}s 刷新 · ◆等你确认 ●运行中 ✓已回复 ◐近期 · Ctrl+C 退出${C.reset}\n`;
   process.stdout.write(out);
 }
 

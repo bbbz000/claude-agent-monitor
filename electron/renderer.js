@@ -3,7 +3,7 @@ const barEl = document.getElementById("bar");
 const dotsEl = document.getElementById("dots");
 
 let cfg = {
-  colors: { WORKING: "#22c55e", DONE: "#06b6d4", RECENT: "#eab308", EMPTY: "#6b7280" },
+  colors: { WORKING: "#22c55e", WAITING: "#f97316", DONE: "#06b6d4", RECENT: "#eab308", EMPTY: "#6b7280" },
   maxDots: 12,
   barBackground: "rgba(0,0,0,0.35)",
 };
@@ -36,7 +36,9 @@ function render(states) {
 
   for (const state of shown) {
     const d = document.createElement("div");
-    d.className = "dot" + (state === "WORKING" ? " working" : "");
+    // WORKING 呼吸；WAITING 更急促闪烁（提示“需要你”）
+    const anim = state === "WORKING" ? " working" : (state === "WAITING" ? " waiting" : "");
+    d.className = "dot" + anim;
     const color = cfg.colors[state] || cfg.colors.RECENT;
     d.style.setProperty("--c", color);
     dotsEl.appendChild(d);

@@ -11,6 +11,7 @@ export function getDefaults() {
     offset: { x: -12, y: 0 },        // 相对定位锚点的像素微调（x 通常为负，向左让出右边距）
     colors: {
       WORKING: "#22c55e",            // 绿：正在运行
+      WAITING: "#f97316",            // 橙红：等你确认/回答（AskUserQuestion/退出计划）
       DONE: "#06b6d4",               // 青：已回复
       RECENT: "#eab308",             // 黄：近期
       EMPTY: "#6b7280",              // 灰：无活跃占位

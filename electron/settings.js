@@ -1,5 +1,5 @@
 // electron/settings.js — 设置窗口逻辑：初始化控件、保存回传。
-const COLORS = ["WORKING", "DONE", "RECENT", "EMPTY"];
+const COLORS = ["WORKING", "WAITING", "DONE", "RECENT", "EMPTY"];
 const $ = (id) => document.getElementById(id);
 
 function syncHex(key) {

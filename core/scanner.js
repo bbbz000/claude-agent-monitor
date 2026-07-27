@@ -63,9 +63,24 @@ export function getMeta(fp, sid) {
   return meta;
 }
 
-// 读尾部推断当前处于什么阶段。返回 { activity, done }
-// done=true 表示这一轮已结束（AI 已回复完 end_turn 等），
-// 用于避免把「已处理完」误显示成「AI 回复中」。
+// 工具名 → 细分活动文字。用于把 tool_use 那一步显示成人话。
+// AskUserQuestion / ExitPlanMode / EnterPlanMode 特殊：它们本质是 AI 停下来等用户，
+// 由下方 getActivity 归为 WAITING（而非普通“工具中”）。
+function toolActivity(name) {
+  if (name === "Bash") return "执行命令";
+  if (name === "Read" || name === "Grep" || name === "Glob") return "读取/搜索";
+  if (name === "Edit" || name === "Write" || name === "NotebookEdit") return "写文件";
+  if (name === "WebSearch" || name === "WebFetch") return "联网";
+  if (name === "Agent" || name === "Task" || /^Task/.test(name || "")) return "子任务";
+  return name ? `调用 ${name}` : "调用工具";
+}
+
+// 需要用户回应的工具：命中即视为 WAITING（等待你确认/回答）
+const WAITING_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode", "EnterPlanMode"]);
+
+// 读尾部推断当前处于什么阶段。返回 { activity, done, waiting }
+// done=true 表示这一轮已结束（AI 已回复完 end_turn 等）；
+// waiting=true 表示 AI 停下等用户确认/回答（AskUserQuestion / ExitPlanMode）。
 export function getActivity(fp, size) {
   try {
     const lines = readTail(fp, size).split("\n").filter(Boolean);
@@ -77,23 +92,32 @@ export function getActivity(fp, size) {
 
       if (o.type === "assistant" && o.message) {
         const stop = o.message.stop_reason;
-        if (stop === "tool_use") return { activity: "调用工具", done: false };
+        if (stop === "tool_use") {
+          // 取本条里最后一个 tool_use 的工具名
+          const c = o.message.content;
+          const tu = Array.isArray(c) ? c.filter((x) => x.type === "tool_use").pop() : null;
+          const name = tu && tu.name;
+          if (name && WAITING_TOOLS.has(name)) {
+            return { activity: "等待你确认/回答", done: false, waiting: true };
+          }
+          return { activity: toolActivity(name), done: false, waiting: false };
+        }
         if (stop === "end_turn" || stop === "stop_sequence" || stop === "max_tokens")
-          return { activity: "已回复", done: true };
+          return { activity: "已回复", done: true, waiting: false };
         // stop_reason 为 null / 缺失：多为流式写入中，确实在生成
-        return { activity: "AI 回复中", done: false };
+        return { activity: "AI 回复中", done: false, waiting: false };
       }
 
       if (o.type === "user" && o.message) {
         const c = o.message.content;
         // 工具结果回填也是 user 消息，content 里是 tool_result
         const isToolResult = Array.isArray(c) && c.some((x) => x.type === "tool_result");
-        if (isToolResult) return { activity: "工具执行中", done: false };
-        return { activity: "等待 AI", done: false }; // 用户刚发消息，等 AI 接手
+        if (isToolResult) return { activity: "工具执行中", done: false, waiting: false };
+        return { activity: "等待 AI", done: false, waiting: false }; // 用户刚发消息，等 AI 接手
       }
     }
   } catch {}
-  return { activity: "", done: false };
+  return { activity: "", done: false, waiting: false };
 }
 
 // ── 扫描所有 session，返回活跃列表 ────────────────────
@@ -118,11 +142,14 @@ export function scan({ workingSec = DEFAULT_WORKING_SEC, recentSec = DEFAULT_REC
       const sid = fn.replace(/\.jsonl$/, "");
       const meta = getMeta(fp, sid);
 
-      // 先读尾部判断这一轮是否已结束
+      // 先读尾部判断这一轮是否已结束 / 是否在等用户
       const act = getActivity(fp, fst.size);
 
       let state, activity = act.activity;
-      if (ageSec < workingSec && !act.done) {
+      if (act.waiting) {
+        // 等待用户确认/回答：优先级最高，不受 age 影响（可能等很久也仍是等待）
+        state = "WAITING";
+      } else if (ageSec < workingSec && !act.done) {
         // 文件刚动过，且本轮尚未结束 —— 确实在运行
         state = "WORKING";
       } else if (act.done) {
