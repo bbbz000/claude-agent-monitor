@@ -16,11 +16,19 @@ function applyConfig(next) {
   // 自由拖动：只有开启时整条才可拖（-webkit-app-region: drag 由 CSS 按此类切换）
   document.body.classList.toggle("draggable", !!next.draggable);
   barEl.style.setProperty("--bar-bg", cfg.barBackground || "transparent");
-  render(lastStates);
+  render(lastStates, true); // 配置变化：强制重画（颜色/maxDots 可能变而 states 未变）
 }
 
-function render(states) {
+let lastRenderKey = null;
+function render(states, force) {
   lastStates = states || [];
+  // 状态数组未变则不重建 DOM：避免每 2s 打断悬停（毁掉 hover 节点→气泡卡住）
+  // 与呼吸动画。config 变化时用 force 强制重画。
+  const key = lastStates.join(",");
+  if (!force && key === lastRenderKey) return;
+  lastRenderKey = key;
+  // 重建会销毁悬停中的圆点节点（mouseleave 不触发）→ 主动收起气泡，防止残留
+  window.bar.unhover();
   dotsEl.innerHTML = "";
 
   // 空态：一个灰色占位点
@@ -36,13 +44,20 @@ function render(states) {
   const shown = lastStates.slice(0, max);
   const overflow = lastStates.length - shown.length;
 
-  for (const state of shown) {
+  for (let i = 0; i < shown.length; i++) {
+    const state = shown[i];
     const d = document.createElement("div");
     // WORKING 呼吸；WAITING 更急促闪烁（提示“需要你”）
     const anim = state === "WORKING" ? " working" : (state === "WAITING" ? " waiting" : "");
     d.className = "dot" + anim;
     const color = cfg.colors[state] || cfg.colors.RECENT;
     d.style.setProperty("--c", color);
+    // 悬停 → 上报索引 + 该圆点中心的窗口内 X（DIP），main 据此定位气泡
+    d.addEventListener("mouseenter", () => {
+      const r = d.getBoundingClientRect();
+      window.bar.hover({ index: i, dotCenterX: r.left + r.width / 2 });
+    });
+    d.addEventListener("mouseleave", () => window.bar.unhover());
     dotsEl.appendChild(d);
   }
 

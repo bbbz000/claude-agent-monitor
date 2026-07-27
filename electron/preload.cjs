@@ -9,6 +9,15 @@ contextBridge.exposeInMainWorld("bar", {
   onAgents: (cb) => ipcRenderer.on("agents:update", (_e, states) => cb(states)),
   // 主进程推送配置（颜色/maxDots/背景等）
   onConfig: (cb) => ipcRenderer.on("config:update", (_e, config) => cb(config)),
+  // 鼠标悬停到第 index 个圆点：上报索引 + 圆点中心的窗口内 X 坐标（DIP）
+  hover: (payload) => ipcRenderer.send("tip:hover", payload),
+  // 移出圆点：请求隐藏气泡
+  unhover: () => ipcRenderer.send("tip:unhover"),
+});
+
+// 悬停气泡窗专用桥：接收 main 推来的单个 agent 详情
+contextBridge.exposeInMainWorld("tip", {
+  onData: (cb) => ipcRenderer.on("tip:data", (_e, data) => cb(data)),
 });
 
 // 设置窗口专用桥

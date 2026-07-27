@@ -54,9 +54,11 @@ function currentBarWidth() {
 let config;
 let barWin = null;
 let settingsWin = null;
+let tipWin = null;             // 悬停气泡窗（透明置顶，只在 hover 时显示）
 let tray = null;
 let scanTimer = null;
 let topTimer = null;           // 置顶守护定时器
+let lastRows = [];             // 最近一次 scan 的完整结果（供 hover 查详情；小条本身仍只收 state）
 let programmaticMove = false; // true 时的 moved 事件由程序触发，非用户拖动，需忽略
 
 // ── 定位：把小条贴到目标显示器的任务栏带 ───────────────
@@ -198,6 +200,56 @@ function createBar() {
   if (DEV) barWin.webContents.openDevTools({ mode: "detach" });
 }
 
+// ── 悬停气泡窗 ───────────────────────────────────────
+// 小条只有 34px 高，气泡画在窗内会被裁掉，故用独立透明置顶小窗承载。
+// 鼠标穿透（setIgnoreMouseEvents），只做展示，不抢 hover。
+const TIP_W = 340, TIP_H = 96; // 窗口画布（气泡实际尺寸更小，多余部分透明）
+function createTip() {
+  tipWin = new BrowserWindow({
+    width: TIP_W, height: TIP_H,
+    transparent: true, frame: false, alwaysOnTop: true, skipTaskbar: true,
+    resizable: false, focusable: false, hasShadow: false, show: false,
+    backgroundColor: "#00000000",
+    webPreferences: {
+      preload: path.join(DIR, "preload.cjs"),
+      contextIsolation: true, nodeIntegration: false,
+    },
+  });
+  tipWin.setAlwaysOnTop(true, "screen-saver");
+  tipWin.setIgnoreMouseEvents(true); // 鼠标穿透：气泡不挡小条
+  tipWin.loadFile(path.join(DIR, "tip.html"));
+}
+
+// 显示气泡：按小条内圆点中心 X（DIP）把气泡定位到该圆点正上方
+function showTip(index, dotCenterX) {
+  if (!tipWin || tipWin.isDestroyed() || !barWin || barWin.isDestroyed()) return;
+  const row = lastRows[index];
+  if (!row) return;
+  // 只推单条详情（含该状态颜色），renderer 侧无标题/路径，隐私最小暴露
+  const color = (config.colors && config.colors[row.state]) || null;
+  tipWin.webContents.send("tip:data", {
+    title: row.title, project: row.project, activity: row.activity,
+    ageSec: row.ageSec, state: row.state, color,
+  });
+  // 定位：气泡水平中心对齐圆点，竖直放在小条上方
+  const bb = barWin.getBounds();
+  const cx = bb.x + (dotCenterX || bb.width / 2);
+  let x = Math.round(cx - TIP_W / 2);
+  let y = Math.round(bb.y - TIP_H + 6); // 略微与小条重叠，视觉更连贯
+  // 夹在圆点所在显示器内，避免气泡跑出屏幕左右/顶边被裁
+  const disp = screen.getDisplayNearestPoint({ x: Math.round(cx), y: bb.y });
+  const wa = disp.workArea;
+  x = Math.max(wa.x, Math.min(x, wa.x + wa.width - TIP_W));
+  if (y < wa.y) y = bb.y + bb.height - 6; // 顶边不够 → 放到小条下方
+  tipWin.setBounds({ x, y, width: TIP_W, height: TIP_H });
+  tipWin.showInactive();
+  tipWin.moveTop();
+}
+
+function hideTip() {
+  if (tipWin && !tipWin.isDestroyed() && tipWin.isVisible()) tipWin.hide();
+}
+
 // ── 置顶守护 ─────────────────────────────────────────
 // Win11 任务栏会周期性抢到最顶层，把贴在其上方的小条盖住。
 // alwaysOnTop 一次性设置不足以对抗，故每轮扫描重新提顶（开销极小）。
@@ -215,6 +267,7 @@ function tick() {
   if (!barWin || barWin.isDestroyed()) return;
   try {
     const rows = scan({ workingSec: config.workingSec, recentSec: config.recentSec });
+    lastRows = rows; // 存完整结果供 hover 查详情（隐私：只在悬停时才把单条推给气泡窗）
     const states = rows.map((r) => r.state);
     if (DIAG) console.log("[bar] tick states=", JSON.stringify(states), "(", states.length, "agents )");
     barWin.webContents.send("agents:update", states);
@@ -339,6 +392,13 @@ function openSettings() {
 }
 
 // ── IPC ──────────────────────────────────────────────
+// 悬停/移出圆点 → 显示/隐藏气泡
+ipcMain.on("tip:hover", (_e, payload) => {
+  if (!payload) return;
+  showTip(payload.index, payload.dotCenterX);
+});
+ipcMain.on("tip:unhover", () => hideTip());
+
 ipcMain.on("settings:save", (_e, incoming) => {
   // 白名单合并：只接受已知字段，防止渲染层塞脏数据
   const next = {
@@ -375,6 +435,7 @@ function wireScreenEvents() {
 app.whenReady().then(() => {
   config = load(app.getPath("userData"));
   createBar();
+  createTip();
   createTray();
   wireScreenEvents();
   startScanLoop();

@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%;
+      background: transparent;    /* 关键：让置顶窗透明，只露气泡 */
+      overflow: hidden;
+      -webkit-user-select: none; user-select: none;
+      cursor: default;
+      /* 气泡本身不接收鼠标，避免挡住小条 hover */
+      pointer-events: none;
+    }
+    #tip {
+      display: inline-block;
+      max-width: 320px;
+      margin: 10px;
+      padding: 8px 11px;
+      background: #181822;             /* 实心底：透明窗上软件合成时边缘才干净 */
+      border: 1px solid #33334a;
+      border-radius: 9px;
+      /* 软件合成下大范围 box-shadow 会在透明窗上留发灰残影，改用细实线描边 +
+         极轻的近距阴影，边缘干净不发灰 */
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
+      color: #e5e7eb;
+      font: 12px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif;
+    }
+    /* 顶行：状态圆点 + 标题 */
+    .head { display: flex; align-items: center; gap: 7px; margin-bottom: 3px; }
+    .head .d { width: 9px; height: 9px; border-radius: 50%; background: var(--c, #6b7280); flex: 0 0 auto; box-shadow: 0 0 5px var(--c); }
+    .title { font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .meta { color: #9ca3af; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .act { color: #cbd5e1; font-size: 11px; margin-top: 2px; }
+    .act b { color: #e5e7eb; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div id="tip">
+    <div class="head"><span class="d" id="t-dot"></span><span class="title" id="t-title"></span></div>
+    <div class="meta" id="t-meta"></div>
+    <div class="act" id="t-act"></div>
+  </div>
+  <script src="tip.js"></script>
+</body>
+</html>
