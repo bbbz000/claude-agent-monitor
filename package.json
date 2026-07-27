@@ -4,14 +4,37 @@
   "description": "实时监控本地 Claude Code / Desktop agent 会话状态（扫描 ~/.claude/projects 下的 .jsonl，无需 MCP）",
   "type": "module",
   "main": "electron/main.js",
+  "author": "claude-agent-monitor",
   "scripts": {
     "monitor": "node monitor.js",
     "sessions": "node sessions.js",
     "bar": "electron .",
     "bar:dev": "electron . --dev",
-    "bar:diag": "electron . --diag --dev"
+    "bar:diag": "electron . --diag --dev",
+    "dist": "electron-builder --win portable"
   },
   "devDependencies": {
-    "electron": "^33.0.0"
+    "electron": "^33.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.claude.agent-monitor",
+    "productName": "ClaudeAgentMonitor",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**/*",
+      "core/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "portable",
+      "icon": "build/icon.png"
+    },
+    "portable": {
+      "artifactName": "ClaudeAgentMonitor-${version}-portable.exe"
+    }
   }
 }

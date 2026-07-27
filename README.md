@@ -122,6 +122,18 @@ npm run bar
 
 > ⚠️ 这是 Electron 的置顶悬浮窗「贴」在桌面/任务栏上，不是真正的任务栏嵌入（真嵌入需 C++ hack 任务栏窗口）。默认用**真透明窗**（胶囊只包住圆点、其余全透），并自动关闭 GPU 硬件合成——这是真透明窗在部分 Windows 上「整窗看不见」的根因，走软件合成路径后透明可靠生效。若仍看不见，可用 `start-bar.bat` 换 `--opaque` 退回不透明深色胶囊，或用 `start-bar-debug.bat` 诊断。小条会每 0.6s 自动重新置顶，防止任务栏抢层级把它盖住。设置存在 `%APPDATA%/claude-agent-monitor/config.json`。
 
+### 打包成 exe（免安装绿色版）
+
+想分发给没装 Node 的人，可打包成单文件免安装 exe（内置 Electron 运行时，双击即用）：
+
+```bash
+npm run dist
+```
+
+产物在 `dist/ClaudeAgentMonitor-<版本>-portable.exe`（约 70MB）。拷给别人双击即可运行，无需安装、不写注册表。图标源文件在 `build/icon.png`（256×256，electron-builder 打包时自动转成 Windows 所需的多尺寸 `.ico`）。
+
+> 打包用 [electron-builder](https://www.electron.build/)（已在 devDependencies）。配置见 `package.json` 的 `build` 字段：`portable` target、`files` 白名单只含 `electron/`、`core/`、`package.json`（终端版脚本、`.bat`/`.vbs` 启动器不入包）。`dist/` 已在 `.gitignore`，产物不入库。首次打包会下载 Electron 及 NSIS 等打包资源。
+
 ### 列出历史 session
 
 ```bash

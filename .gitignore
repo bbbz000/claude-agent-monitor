@@ -1,3 +1,4 @@
 node_modules/
 status.json
 config.json
+dist/
