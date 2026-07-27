@@ -6,7 +6,52 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 
-export const PROJECTS_ROOT = path.join(os.homedir(), ".claude", "projects");
+// projects 根目录解析（优先级：显式覆盖 > CLAUDE_CONFIG_DIR 环境变量 > 默认 ~/.claude）。
+// Claude Code 用 CLAUDE_CONFIG_DIR 指向 .claude 目录本身，会话在其下 projects/。
+// override 传的是 .claude 根目录（与环境变量语义一致），内部统一拼 /projects。
+
+// 解析出 .claude 根目录 + 来源标记（供设置界面显示“路径从哪来”）。
+// source: "manual"（手动填）/ "env"（环境变量）/ "default"（~/.claude）
+function resolveBase(override) {
+  if (typeof override === "string" && override.trim()) return { base: override.trim(), source: "manual" };
+  const env = process.env.CLAUDE_CONFIG_DIR && process.env.CLAUDE_CONFIG_DIR.trim();
+  if (env) return { base: env, source: "env" };
+  return { base: path.join(os.homedir(), ".claude"), source: "default" };
+}
+
+export function resolveProjectsRoot(override) {
+  return path.join(resolveBase(override).base, "projects");
+}
+
+// 检测某个覆盖值解析出的 projects 目录：是否存在、是不是目录、里面有多少 .jsonl。
+// 纯只读，供设置界面“检测”按钮用。返回 { root, source, exists, isDir, sessionCount, error }。
+export function probeProjectsRoot(override) {
+  const { base, source } = resolveBase(override);
+  const root = path.join(base, "projects");
+  const out = { root, source, exists: false, isDir: false, sessionCount: 0, error: null };
+  try {
+    const st = fs.statSync(root);
+    out.exists = true;
+    out.isDir = st.isDirectory();
+    if (!out.isDir) return out; // 路径存在但不是目录
+    // 数一层子目录（每个项目目录）下的 .jsonl 总数
+    for (const proj of fs.readdirSync(root)) {
+      const dir = path.join(root, proj);
+      let dst; try { dst = fs.statSync(dir); } catch { continue; }
+      if (!dst.isDirectory()) continue;
+      for (const fn of fs.readdirSync(dir)) {
+        if (fn.endsWith(".jsonl")) out.sessionCount++;
+      }
+    }
+  } catch (e) {
+    // 目录不存在时 statSync 抛 ENOENT：exists 保持 false，非致命
+    if (e && e.code !== "ENOENT") out.error = e.message;
+  }
+  return out;
+}
+
+// 默认根（无覆盖 = 环境变量/默认）。保留导出以兼容既有 import。
+export const PROJECTS_ROOT = resolveProjectsRoot();
 
 // 默认阈值（可被 scan() 的参数覆盖）
 export const DEFAULT_WORKING_SEC = 30; // < 30s 无修改视为正在运行
@@ -122,13 +167,15 @@ export function getActivity(fp, size) {
 
 // ── 扫描所有 session，返回活跃列表 ────────────────────
 // 阈值参数化：workingSec / recentSec 可由调用方（小条设置）覆盖。
-export function scan({ workingSec = DEFAULT_WORKING_SEC, recentSec = DEFAULT_RECENT_SEC } = {}) {
+// configDir：可选的 .claude 根目录覆盖（小条设置里手动填的）；不传则走环境变量/默认。
+export function scan({ workingSec = DEFAULT_WORKING_SEC, recentSec = DEFAULT_RECENT_SEC, configDir } = {}) {
   const now = Date.now();
   const rows = [];
-  if (!fs.existsSync(PROJECTS_ROOT)) return rows;
+  const root = resolveProjectsRoot(configDir);
+  if (!fs.existsSync(root)) return rows;
 
-  for (const proj of fs.readdirSync(PROJECTS_ROOT)) {
-    const dir = path.join(PROJECTS_ROOT, proj);
+  for (const proj of fs.readdirSync(root)) {
+    const dir = path.join(root, proj);
     let st; try { st = fs.statSync(dir); } catch { continue; }
     if (!st.isDirectory()) continue;
 

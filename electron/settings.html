@@ -23,6 +23,21 @@
     }
     .swatch { display: flex; align-items: center; gap: 8px; }
     .swatch code { color: #9ca3af; font-size: 11px; min-width: 62px; }
+    /* 数据目录：输入框加宽到能看清路径 */
+    #configDir { width: 230px; }
+    .probe {
+      flex: 0 0 auto; padding: 5px 14px; border-radius: 6px; border: 1px solid #3f3f5a;
+      background: #2a2a3c; color: #e5e7eb; cursor: pointer; font: 600 12px inherit;
+    }
+    .probe:hover { background: #34344a; }
+    .probe-result {
+      font-size: 11px; margin: 2px 0 0; min-height: 15px; white-space: normal;
+      word-break: break-all; line-height: 1.4;
+    }
+    .probe-result .ok { color: #4ade80; }
+    .probe-result .bad { color: #f87171; }
+    .probe-result .path { color: #93c5fd; }
+    .probe-result .src { color: #9ca3af; }
     .actions { display: flex; gap: 10px; margin-top: 24px; }
     button {
       flex: 1; padding: 9px; border-radius: 7px; border: none; cursor: pointer;
@@ -58,6 +73,14 @@
     <input type="number" id="workingSec" min="1" max="3600" /></div>
   <div class="row"><label>RECENT：超过此秒数不再显示</label>
     <input type="number" id="recentSec" min="5" max="86400" /></div>
+
+  <h2>数据目录</h2>
+  <div class="row"><label>Claude 配置目录（留空=自动）</label>
+    <input type="text" id="configDir" placeholder="留空自动检测" /></div>
+  <div class="row" style="justify-content: flex-end; margin-top: 2px;">
+    <button class="probe" id="probe" type="button">检测</button></div>
+  <div class="probe-result" id="probeResult"></div>
+  <div class="hint">留空 = 自动检测（环境变量 CLAUDE_CONFIG_DIR，否则默认 ~/.claude）。仅当你自定义过 Claude 数据位置时才需填 .claude 根目录（如 D:\ClaudeData\.claude）。</div>
 
   <h2>外观</h2>
   <div class="row"><label>小条背景（CSS 颜色，transparent 可关闭）</label>

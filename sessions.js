@@ -1,10 +1,11 @@
 import fs from "fs";
 import path from "path";
-import os from "os";
 import { fileURLToPath } from "url";
+import { resolveProjectsRoot } from "./core/scanner.js";
 
-// Claude Code / Desktop agent 会话都以 .jsonl 存在 ~/.claude/projects/<项目>/<sessionId>.jsonl
-const PROJECTS_ROOT = path.join(os.homedir(), ".claude", "projects");
+// Claude Code / Desktop agent 会话都以 .jsonl 存在 <.claude>/projects/<项目>/<sessionId>.jsonl
+// 复用 scanner 的解析：自动适配 CLAUDE_CONFIG_DIR 环境变量，否则默认 ~/.claude。
+const PROJECTS_ROOT = resolveProjectsRoot();
 
 const COLORS = {
   reset: "\x1b[0m",

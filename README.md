@@ -15,6 +15,8 @@ Claude Code / Desktop 的每个 agent 会话都以 `.jsonl` 文件明文存在�
 
 会话每产生一条消息，对应文件就被写入一次。本工具**纯靠扫描这些文件的修改时间（mtime）来判断 agent 是否活跃**——被动观测，零侵入，不依赖任何上报机制。
 
+> 目录**自动适配**：默认扫 `~/.claude/projects`；若你用环境变量 `CLAUDE_CONFIG_DIR` 自定义过 Claude 数据位置，会自动跟随。也可在小条「设置…」里手动指定 `.claude` 根目录（见下）。
+
 ```
 ~/.claude/projects/**/*.jsonl  ──扫描 mtime──>  monitor.js（终端面板）
 ```
@@ -115,7 +117,7 @@ npm run bar
 
 - **自由拖动** —— 开关：勾选后可任意拖动小条并记住位置；取消勾选跳回任务栏右下
 - **活跃阈值** —— 1 / 2 / 5 / 10 分钟（超过则不再显示）
-- **设置…** —— 取色器自定义五种状态颜色、圆点上限、阈值、小条背景
+- **设置…** —— 取色器自定义五种状态颜色、圆点上限、阈值、数据目录、小条背景
 - **退出**
 
 > ⚠️ 这是 Electron 的置顶悬浮窗「贴」在桌面/任务栏上，不是真正的任务栏嵌入（真嵌入需 C++ hack 任务栏窗口）。默认用**真透明窗**（胶囊只包住圆点、其余全透），并自动关闭 GPU 硬件合成——这是真透明窗在部分 Windows 上「整窗看不见」的根因，走软件合成路径后透明可靠生效。若仍看不见，可用 `start-bar.bat` 换 `--opaque` 退回不透明深色胶囊，或用 `start-bar-debug.bat` 诊断。小条会每 0.6s 自动重新置顶，防止任务栏抢层级把它盖住。设置存在 `%APPDATA%/claude-agent-monitor/config.json`。
@@ -140,7 +142,7 @@ node sessions.js --project LDL   # 按项目路径过滤
 | `REFRESH_MS` | 2000 | 面板刷新间隔（毫秒） |
 | `MAX_ROWS` | 15 | 最多显示多少个 agent |
 
-**任务栏小条**：改托盘菜单「设置…」即可，或直接编辑 `%APPDATA%/claude-agent-monitor/config.json`（`displayId` / `position` / `freePos`（自由拖动锚点 `{right,y}`，右边缘+顶边）/ `offset` / `colors` / `maxDots` / `workingSec` / `recentSec` / `barBackground` / `refreshMs`）。
+**任务栏小条**：改托盘菜单「设置…」即可，或直接编辑 `%APPDATA%/claude-agent-monitor/config.json`（`displayId` / `configDir`（Claude `.claude` 根目录覆盖，留空=自动检测 `CLAUDE_CONFIG_DIR` / 默认 `~/.claude`）/ `position` / `freePos`（自由拖动锚点 `{right,y}`，右边缘+顶边）/ `offset` / `colors` / `maxDots` / `workingSec` / `recentSec` / `barBackground` / `refreshMs`）。
 
 ## 扩展：对接硬件 / 其他前端
 

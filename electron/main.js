@@ -3,7 +3,7 @@
 // 默认用不透明胶囊窗（真透明窗在部分 Windows 上不合成会整窗看不见）；--transparent 可试真透明。
 import { app, BrowserWindow, ipcMain, Menu, Tray, screen, nativeImage } from "electron";
 import path from "path";
-import { scan } from "../core/scanner.js";
+import { scan, probeProjectsRoot } from "../core/scanner.js";
 import { load, save, resolveDisplay } from "./config.js";
 
 const DIR = import.meta.dirname;
@@ -266,7 +266,7 @@ function keepOnTop() {
 function tick() {
   if (!barWin || barWin.isDestroyed()) return;
   try {
-    const rows = scan({ workingSec: config.workingSec, recentSec: config.recentSec });
+    const rows = scan({ workingSec: config.workingSec, recentSec: config.recentSec, configDir: config.configDir });
     lastRows = rows; // 存完整结果供 hover 查详情（隐私：只在悬停时才把单条推给气泡窗）
     const states = rows.map((r) => r.state);
     if (DIAG) console.log("[bar] tick states=", JSON.stringify(states), "(", states.length, "agents )");
@@ -374,7 +374,7 @@ function openSettings() {
   }
   settingsWin = new BrowserWindow({
     width: 420,
-    height: 560,
+    height: 700,
     resizable: false,
     title: "设置 · Claude Agent Monitor",
     autoHideMenuBar: true,
@@ -408,13 +408,21 @@ ipcMain.on("settings:save", (_e, incoming) => {
     workingSec: clampInt(incoming.workingSec, 1, 3600, config.workingSec),
     recentSec: clampInt(incoming.recentSec, 5, 86400, config.recentSec),
     barBackground: typeof incoming.barBackground === "string" ? incoming.barBackground : config.barBackground,
+    configDir: typeof incoming.configDir === "string" ? incoming.configDir.trim() : config.configDir,
   };
-  // maxDots 变化需要改窗宽 → 重定位；refreshMs 未在设置窗口暴露，故不重启循环
+  // maxDots 变化需要改窗宽 → 重定位；configDir 变化下一轮 tick 自动用新路径；refreshMs 未暴露故不重启循环
   applyConfig(next);
+  tick(); // 立即扫一次，让改目录/阈值即时生效，不必等下一个 refreshMs
 });
 
 ipcMain.on("settings:close", () => {
   if (settingsWin && !settingsWin.isDestroyed()) settingsWin.close();
+});
+
+// 检测 configDir：解析路径 + 只读探测目录/文件数，回传给设置窗
+ipcMain.handle("settings:probe", (_e, configDir) => {
+  const override = typeof configDir === "string" ? configDir.trim() : "";
+  return probeProjectsRoot(override);
 });
 
 function clampInt(v, min, max, fallback) {

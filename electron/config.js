@@ -6,6 +6,7 @@ import path from "path";
 export function getDefaults() {
   return {
     displayId: null,                 // null = 主显示器；否则为 screen display.id
+    configDir: "",                   // Claude 配置目录（.claude 根）覆盖；空=自动（CLAUDE_CONFIG_DIR / 默认 ~/.claude）
     position: "workarea-bottom-right", // 默认贴任务栏正上方（不与任务栏抢层级，最稳）
     draggable: false,                // 是否允许自由拖动（唯一开关；true 时才可拖 + 走 free 定位）
     freePos: null,                   // 自由模式（拖动后）记住的锚点 {right,y}（右边缘+顶边）；draggable 时生效
