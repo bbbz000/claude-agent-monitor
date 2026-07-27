@@ -256,49 +256,6 @@ function applyConfig(next, { reposition = true, restartLoop = false } = {}) {
 
 // ── 右键菜单 / Tray ──────────────────────────────────
 function buildMenuTemplate() {
-  const displays = screen.getAllDisplays();
-  const primary = screen.getPrimaryDisplay();
-
-  const displayItems = [
-    {
-      label: "主显示器",
-      type: "radio",
-      checked: config.displayId == null,
-      click: () => applyConfig({ ...config, displayId: null }),
-    },
-    ...displays.map((d, i) => {
-      const isPrimary = d.id === primary.id;
-      return {
-        label: `显示器 ${i + 1}${isPrimary ? "（主）" : ""}  ${d.bounds.width}×${d.bounds.height}`,
-        type: "radio",
-        checked: config.displayId === d.id,
-        click: () => applyConfig({ ...config, displayId: d.id }),
-      };
-    }),
-  ];
-
-  const positionItems = [
-    { label: "自由拖动（当前位置）", type: "radio", checked: config.position === "free",
-      // 选它=保持当前所在位置进入自由模式；若还没坐标则记录当前窗口右边缘
-      click: () => {
-        const b = barWin ? barWin.getBounds() : { x: 0, width: 0, y: 0 };
-        const here = { right: b.x + b.width, y: b.y };
-        applyConfig({ ...config, position: "free", freePos: config.freePos || here });
-      } },
-    { type: "separator" },
-    ...[
-      ["workarea-bottom-right", "贴任务栏·右下（不压任务栏）"],
-      ["bottom-right", "贴任务栏·右下"],
-      ["bottom-center", "贴任务栏·底部居中"],
-      ["bottom-left", "贴任务栏·左下"],
-    ].map(([val, label]) => ({
-      label,
-      type: "radio",
-      checked: config.position === val,
-      click: () => applyConfig({ ...config, position: val }),
-    })),
-  ];
-
   const thresholdItems = [
     [60, "1 分钟"],
     [120, "2 分钟"],
@@ -311,21 +268,24 @@ function buildMenuTemplate() {
     click: () => applyConfig({ ...config, recentSec: sec }, { restartLoop: false }),
   }));
 
-  const offsetItems = [
-    { label: "向左 ←", click: () => nudge(-10, 0) },
-    { label: "向右 →", click: () => nudge(10, 0) },
-    { label: "向上 ↑", click: () => nudge(0, -10) },
-    { label: "向下 ↓", click: () => nudge(0, 10) },
-    { type: "separator" },
-    { label: "重置微调", click: () => applyConfig({ ...config, offset: { x: config.position === "bottom-right" ? -12 : 0, y: 0 } }) },
-  ];
-
   return [
     { label: "Claude Agent Monitor", enabled: false },
     { type: "separator" },
-    { label: "选择显示器", submenu: displayItems },
-    { label: "位置", submenu: positionItems },
-    { label: "位置微调", submenu: offsetItems },
+    {
+      label: "自由拖动",
+      type: "checkbox",
+      checked: config.position === "free",
+      // 勾选=进入自由拖动（用当前窗口位置作锚点）；取消=回到贴任务栏右下
+      click: (item) => {
+        if (item.checked) {
+          const b = barWin ? barWin.getBounds() : { x: 0, width: 0, y: 0 };
+          const here = { right: b.x + b.width, y: b.y };
+          applyConfig({ ...config, position: "free", freePos: config.freePos || here });
+        } else {
+          applyConfig({ ...config, position: "workarea-bottom-right" });
+        }
+      },
+    },
     { label: "活跃阈值", submenu: thresholdItems },
     { type: "separator" },
     { label: "设置…", click: openSettings },
@@ -334,20 +294,18 @@ function buildMenuTemplate() {
   ];
 }
 
-function nudge(dx, dy) {
-  const offset = { x: (config.offset?.x || 0) + dx, y: (config.offset?.y || 0) + dy };
-  applyConfig({ ...config, offset });
-}
-
 function rebuildMenus() {
   if (tray) tray.setContextMenu(Menu.buildFromTemplate(buildMenuTemplate()));
 }
 
 function createTray() {
-  // 用 1x1 透明位图占位（无图标文件也能建 Tray；Windows 会显示默认区域）
-  const img = nativeImage.createFromDataURL(
-    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAKElEQVR42mNkYPhfz0AEYBxVSFsFAO2m/wF3AAAAAElFTkSuQmCC"
-  );
+  // 优先用打包的图标文件（32×32 绿点，呼应小条主题）；读失败则回退透明占位图
+  let img = nativeImage.createFromPath(path.join(DIR, "tray-icon.png"));
+  if (img.isEmpty()) {
+    img = nativeImage.createFromDataURL(
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAKElEQVR42mNkYPhfz0AEYBxVSFsFAO2m/wF3AAAAAElFTkSuQmCC"
+    );
+  }
   tray = new Tray(img);
   tray.setToolTip("Claude Agent Monitor");
   tray.setContextMenu(Menu.buildFromTemplate(buildMenuTemplate()));
