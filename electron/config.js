@@ -7,7 +7,8 @@ export function getDefaults() {
   return {
     displayId: null,                 // null = 主显示器；否则为 screen display.id
     position: "workarea-bottom-right", // 默认贴任务栏正上方（不与任务栏抢层级，最稳）
-    freePos: null,                   // 自由模式（拖动后）记住的锚点 {right,y}（右边缘+顶边）；position==="free" 时生效
+    draggable: false,                // 是否允许自由拖动（唯一开关；true 时才可拖 + 走 free 定位）
+    freePos: null,                   // 自由模式（拖动后）记住的锚点 {right,y}（右边缘+顶边）；draggable 时生效
     offset: { x: -12, y: 0 },        // 相对定位锚点的像素微调（x 通常为负，向左让出右边距）
     colors: {
       WORKING: "#22c55e",            // 绿：正在运行

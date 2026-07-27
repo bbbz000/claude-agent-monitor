@@ -75,8 +75,9 @@ function positionBar() {
   const w = currentBarWidth();
   const h = BAR_HEIGHT;
 
-  // 自由模式：用户拖动过 → 直接用记住的绝对坐标，不再自动贴任务栏
-  if (config.position === "free" && config.freePos) {
+  // 有自由锚点就用它（拖动过或勾选过）：draggable 只控制“能不能拖”，
+  // 不控制“停在哪”——取消勾选后仍留在原地，不弹回任务栏。
+  if (config.freePos) {
     // freePos 存的是“右边缘”锚点：宽度变化时右边缘不动、向左伸缩。
     // 兼容旧配置（存的是左上角 x）：用 x + 当前宽度推出右边缘。
     const fp = config.freePos;
@@ -175,11 +176,12 @@ function createBar() {
     if (DIAG) console.log("[bar] shown. isVisible:", barWin.isVisible(), "bounds:", JSON.stringify(barWin.getBounds()));
   });
 
-  // 用户拖动小条 → 记住绝对坐标并切到自由模式（之后不再自动贴任务栏）
+  // 用户拖动小条（仅在“自由拖动”开启时）→ 记住右边缘锚点，用于宽度伸缩定位
   let moveSaveTimer = null;
   barWin.on("moved", () => {
     if (!barWin || barWin.isDestroyed()) return;
-    if (programmaticMove) return; // 程序定位触发的，不算用户拖动
+    if (programmaticMove) return;   // 程序定位触发的，不算用户拖动
+    if (!config.draggable) return;  // 未开自由拖动 → 忽略（不再被动切 free、不再重复勾选）
     const b = barWin.getBounds();
     // 存“右边缘”而非左上角 x：这样圆点增减时宽度变化，右边缘保持不动、向左伸缩
     const right = b.x + b.width;
@@ -187,10 +189,9 @@ function createBar() {
     // 去抖：拖动过程会频繁触发，停下 300ms 再存盘
     if (moveSaveTimer) clearTimeout(moveSaveTimer);
     moveSaveTimer = setTimeout(() => {
-      config = { ...config, position: "free", freePos: { right, y } };
+      config = { ...config, freePos: { right, y } };
       save(app.getPath("userData"), config);
-      rebuildMenus(); // 让菜单里的“位置”单选反映当前为自由模式
-      if (DIAG) console.log("[bar] moved → free right:", right, "y:", y);
+      if (DIAG) console.log("[bar] moved → freePos right:", right, "y:", y);
     }, 300);
   });
 
@@ -240,6 +241,7 @@ function startScanLoop() {
 function pushConfig() {
   if (barWin && !barWin.isDestroyed()) {
     // opaque：纯不透明窗（四角需铺满、不留圆角露底）；透明窗则 false
+    // draggable：renderer 据此动态开关 -webkit-app-region，未开时整条不可拖
     barWin.webContents.send("config:update", { ...config, opaque: !TRANSPARENT });
   }
 }
@@ -274,16 +276,14 @@ function buildMenuTemplate() {
     {
       label: "自由拖动",
       type: "checkbox",
-      checked: config.position === "free",
-      // 勾选=进入自由拖动（用当前窗口位置作锚点）；取消=回到贴任务栏右下
+      checked: !!config.draggable,
+      // 勾选=开启自由拖动：以当前窗口位置作锚点，原地不动，此后可拖。
+      // 取消=只锁定（不可再拖），小条留在当前位置不动（保留 freePos）。
       click: (item) => {
-        if (item.checked) {
-          const b = barWin ? barWin.getBounds() : { x: 0, width: 0, y: 0 };
-          const here = { right: b.x + b.width, y: b.y };
-          applyConfig({ ...config, position: "free", freePos: config.freePos || here });
-        } else {
-          applyConfig({ ...config, position: "workarea-bottom-right" });
-        }
+        const b = barWin ? barWin.getBounds() : { x: 0, width: 0, y: 0 };
+        const here = { right: b.x + b.width, y: b.y };
+        // 无论开关方向，都把 freePos 钉在当前位置：勾选后可拖、取消后原地锁定
+        applyConfig({ ...config, draggable: item.checked, freePos: config.freePos || here });
       },
     },
     { label: "活跃阈值", submenu: thresholdItems },

@@ -13,6 +13,8 @@ function applyConfig(next) {
   cfg = { ...cfg, ...next, colors: { ...cfg.colors, ...(next.colors || {}) } };
   // 不透明窗：让胶囊铺满整窗、四角不留圆角（否则露出窗口底色方块）
   document.body.classList.toggle("opaque", !!next.opaque);
+  // 自由拖动：只有开启时整条才可拖（-webkit-app-region: drag 由 CSS 按此类切换）
+  document.body.classList.toggle("draggable", !!next.draggable);
   barEl.style.setProperty("--bar-bg", cfg.barBackground || "transparent");
   render(lastStates);
 }

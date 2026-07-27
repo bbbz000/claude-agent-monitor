@@ -25,12 +25,17 @@ body.opaque #bar {
   /* 胶囊背景由 JS 按 config.barBackground 设置到 --bar-bg */
   background: var(--bar-bg, rgba(0, 0, 0, 0.35));
   border-radius: 17px;
-  -webkit-app-region: drag;   /* 整条可拖：左键按住即可移动小条 */
-  cursor: move;
+  /* 默认不可拖：仅在 body.draggable（勾选“自由拖动”）时开启 drag 区域 */
+  -webkit-app-region: no-drag;
+  cursor: default;
 }
 
-/* 圆点/文字随整条一起拖（右键弹菜单不受 drag 影响） */
-#dots { -webkit-app-region: drag; }
+/* 开启自由拖动：整条可拖，左键按住即可移动小条 */
+body.draggable #bar,
+body.draggable #dots {
+  -webkit-app-region: drag;
+  cursor: move;
+}
 
 #dots {
   display: flex;
