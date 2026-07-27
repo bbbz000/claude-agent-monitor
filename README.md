@@ -96,6 +96,8 @@ npm run monitor
 
 圆点超过上限（默认 12）折叠成 `…+N`。所有颜色都可在设置里改（想要单色就把几个状态设成同色）。
 
+小条宽度**随圆点数量自适应**：几个 agent 就多宽，最少保留 1 个圆点单位（无活跃时=1 个灰点）。伸缩以**右边缘为锚**——圆点变多向左长、变少向右收，右边缘始终不动，贴任务栏右下时最自然。
+
 **Windows：** 双击 `start-bar.bat`（首次会自动 `npm install` 安装 Electron），或：
 
 ```bash
@@ -135,7 +137,7 @@ node sessions.js --project LDL   # 按项目路径过滤
 | `REFRESH_MS` | 2000 | 面板刷新间隔（毫秒） |
 | `MAX_ROWS` | 15 | 最多显示多少个 agent |
 
-**任务栏小条**：改托盘菜单「设置…」即可，或直接编辑 `%APPDATA%/claude-agent-monitor/config.json`（`displayId` / `position` / `freePos`（自由拖动坐标）/ `offset` / `colors` / `maxDots` / `workingSec` / `recentSec` / `barBackground` / `refreshMs`）。
+**任务栏小条**：改托盘菜单「设置…」即可，或直接编辑 `%APPDATA%/claude-agent-monitor/config.json`（`displayId` / `position` / `freePos`（自由拖动锚点 `{right,y}`，右边缘+顶边）/ `offset` / `colors` / `maxDots` / `workingSec` / `recentSec` / `barBackground` / `refreshMs`）。
 
 ## 扩展：对接硬件 / 其他前端
 

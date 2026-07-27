@@ -24,12 +24,31 @@ if (TRANSPARENT) {
 // 不透明模式下的窗口底色 = 胶囊深色（与 renderer 的胶囊背景观感一致）
 const OPAQUE_BG = "#1b1b24";
 
-// 小条尺寸（DIP）。宽度按 maxDots 预留，避免圆点增减时窗口抖动。
+// 小条尺寸（DIP）。宽度按当前圆点单位数动态伸缩（右边缘固定），最少保留 1 个单位。
 const BAR_HEIGHT = 34;
 const DOT_SLOT = 20;   // 每个圆点占位宽（含间隔）
 const BAR_PADDING = 20; // 胶囊左右内边距合计
-function barWidth(maxDots) {
-  return Math.max(60, maxDots * DOT_SLOT + BAR_PADDING);
+
+// 给定“圆点单位数”算胶囊宽度（含左右内边距）。units 至少按 1 计（空态灰点）。
+function barWidthForUnits(units) {
+  const u = Math.max(1, units);
+  return Math.max(60, u * DOT_SLOT + BAR_PADDING);
+}
+
+// 由 state 数组推出实际会画出的圆点单位数，与 renderer.render() 的逻辑保持一致：
+//   空态 → 1（一个灰点）；否则 = min(len, maxDots) + (是否溢出的 …+N 占 1 个单位)
+function dotUnits(states) {
+  const n = states ? states.length : 0;
+  if (n === 0) return 1;
+  const shown = Math.min(n, config.maxDots);
+  const overflow = n - shown > 0 ? 1 : 0;
+  return shown + overflow;
+}
+
+// 当前应有的窗口宽度（按最近一次 state）
+let lastUnits = 1;
+function currentBarWidth() {
+  return barWidthForUnits(lastUnits);
 }
 
 let config;
@@ -53,21 +72,29 @@ function setBar(bounds) {
 function positionBar() {
   if (!barWin) return;
 
-  const w = barWidth(config.maxDots);
+  const w = currentBarWidth();
   const h = BAR_HEIGHT;
 
   // 自由模式：用户拖动过 → 直接用记住的绝对坐标，不再自动贴任务栏
   if (config.position === "free" && config.freePos) {
-    const { x, y } = config.freePos;
-    // 校验坐标仍落在某个显示器内（防止拔屏后小条消失在屏外）
+    // freePos 存的是“右边缘”锚点：宽度变化时右边缘不动、向左伸缩。
+    // 兼容旧配置（存的是左上角 x）：用 x + 当前宽度推出右边缘。
+    const fp = config.freePos;
+    const right = fp.right != null ? fp.right : (fp.x + w);
+    const x = right - w;
+    const y = fp.y;
+    // 校验坐标仍落在某个显示器内（防止拔屏后小条消失在屏外）。
+    // 用整屏 bounds（含任务栏带）而非 workArea：小条本就允许贴在任务栏上，
+    // 若拖到任务栏带内、y 会超出 workArea 底边，用 workArea 校验会误判“出屏”。
     const onScreen = screen.getAllDisplays().some((d) => {
-      const wa = d.workArea;
-      return x + w > wa.x && x < wa.x + wa.width && y + h > wa.y && y < wa.y + wa.height;
+      const bb = d.bounds;
+      return x + w > bb.x && x < bb.x + bb.width && y + h > bb.y && y < bb.y + bb.height;
     });
     if (onScreen) {
       setBar({ x: Math.round(x), y: Math.round(y), width: w, height: h });
       return;
     }
+    if (DIAG) console.log("[bar] free OFFSCREEN → fallback. right:", right, "w:", w, "x:", x, "y:", y);
     // 坐标失效 → 落回主屏任务栏右下（不覆盖存储，插回屏幕即可恢复）
   }
 
@@ -116,7 +143,7 @@ function positionBar() {
 // ── 建小条窗 ─────────────────────────────────────────
 function createBar() {
   barWin = new BrowserWindow({
-    width: barWidth(config.maxDots),
+    width: currentBarWidth(), // 初始按 1 单位；ready-to-show 首扫后按实际圆点数重定位
     height: BAR_HEIGHT,
     transparent: TRANSPARENT, // 默认真透明（已关 GPU 合成兜底，避免整窗不显示）
     frame: false,
@@ -153,14 +180,17 @@ function createBar() {
   barWin.on("moved", () => {
     if (!barWin || barWin.isDestroyed()) return;
     if (programmaticMove) return; // 程序定位触发的，不算用户拖动
-    const [x, y] = barWin.getPosition();
+    const b = barWin.getBounds();
+    // 存“右边缘”而非左上角 x：这样圆点增减时宽度变化，右边缘保持不动、向左伸缩
+    const right = b.x + b.width;
+    const y = b.y;
     // 去抖：拖动过程会频繁触发，停下 300ms 再存盘
     if (moveSaveTimer) clearTimeout(moveSaveTimer);
     moveSaveTimer = setTimeout(() => {
-      config = { ...config, position: "free", freePos: { x, y } };
+      config = { ...config, position: "free", freePos: { right, y } };
       save(app.getPath("userData"), config);
       rebuildMenus(); // 让菜单里的“位置”单选反映当前为自由模式
-      if (DIAG) console.log("[bar] moved → free pos:", x, y);
+      if (DIAG) console.log("[bar] moved → free right:", right, "y:", y);
     }, 300);
   });
 
@@ -187,6 +217,12 @@ function tick() {
     const states = rows.map((r) => r.state);
     if (DIAG) console.log("[bar] tick states=", JSON.stringify(states), "(", states.length, "agents )");
     barWin.webContents.send("agents:update", states);
+    // 圆点单位数变化 → 重算窗口宽度并重定位（右边缘固定）
+    const units = dotUnits(states);
+    if (units !== lastUnits) {
+      lastUnits = units;
+      positionBar();
+    }
   } catch (e) {
     if (DIAG) console.log("[bar] scan error:", e.message);
   }
@@ -243,10 +279,11 @@ function buildMenuTemplate() {
 
   const positionItems = [
     { label: "自由拖动（当前位置）", type: "radio", checked: config.position === "free",
-      // 选它=保持当前所在位置进入自由模式；若还没坐标则记录当前窗口位置
+      // 选它=保持当前所在位置进入自由模式；若还没坐标则记录当前窗口右边缘
       click: () => {
-        const [x, y] = barWin ? barWin.getPosition() : [0, 0];
-        applyConfig({ ...config, position: "free", freePos: config.freePos || { x, y } });
+        const b = barWin ? barWin.getBounds() : { x: 0, width: 0, y: 0 };
+        const here = { right: b.x + b.width, y: b.y };
+        applyConfig({ ...config, position: "free", freePos: config.freePos || here });
       } },
     { type: "separator" },
     ...[
