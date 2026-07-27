@@ -1,5 +1,6 @@
 @echo off
-cd /d "%~dp0"
+rem 一键启动终端面板。脚本在 scripts/ 下，工作目录切到工程根（%~dp0 的上一级）。
+cd /d "%~dp0.."
 
 where node >nul 2>nul
 if errorlevel 1 (

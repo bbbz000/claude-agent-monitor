@@ -49,10 +49,14 @@ claude-agent-monitor/
 │   ├── renderer.*      # 小条 UI：画圆点 / 折叠 / 上色
 │   ├── settings.*      # 设置窗口（取色器 + 阈值）
 │   └── config.js       # 配置读写
-├── start.bat           # 一键启动终端面板
-├── start-bar.bat       # 一键启动任务栏小条（首次会自动 npm install）
-├── start-bar-debug.bat # 诊断模式启动小条（看不见时用：亮底 + DevTools + 日志）
+├── scripts/            # 一键启动脚本
+│   ├── start.bat            # 启动终端面板
+│   ├── start-bar.bat        # 启动任务栏小条（首次会自动 npm install）
+│   ├── start-bar-hidden.vbs # 无窗启动小条（不弹黑色控制台）
+│   └── start-bar-debug.bat  # 诊断模式（看不见时用：亮底 + DevTools + 日志）
+├── build/          # 打包资源（icon.png，electron-builder 自动转 .ico）
 ├── package.json
+├── LICENSE
 └── README.md
 ```
 
@@ -61,11 +65,11 @@ claude-agent-monitor/
 ### 前置条件
 
 - **终端面板**：Node.js >= 18（仅用内置模块，**无第三方依赖，无需 npm install**）
-- **任务栏小条**：额外需要 Electron（`start-bar.bat` 首次运行会自动 `npm install`）
+- **任务栏小条**：额外需要 Electron（`scripts/start-bar.bat` 首次运行会自动 `npm install`）
 
 ### 启动实时监控面板
 
-**Windows：** 双击 `start.bat`，或：
+**Windows：** 双击 `scripts/start.bat`，或：
 
 ```bash
 npm run monitor
@@ -105,11 +109,13 @@ npm run monitor
 
 小条宽度**随圆点数量自适应**：几个 agent 就多宽，最少保留 1 个圆点单位（无活跃时=1 个灰点）。伸缩以**右边缘为锚**——圆点变多向左长、变少向右收，右边缘始终不动，贴任务栏右下时最自然。
 
-**Windows：** 双击 `start-bar.bat`（首次会自动 `npm install` 安装 Electron），或：
+**Windows：** 双击 `scripts/start-bar.bat`（首次会自动 `npm install` 安装 Electron），或：
 
 ```bash
 npm run bar
 ```
+
+> 想启动时不弹黑色控制台窗口，改双击 `scripts/start-bar-hidden.vbs`（无窗启动，首装依赖也在后台静默进行）。
 
 **拖动小条**：勾选托盘菜单的「自由拖动」后，用左键按住小条拖到屏幕任意位置即可；会记住坐标，下次启动回到原处。取消勾选「自由拖动」则跳回任务栏右下。
 
@@ -120,7 +126,7 @@ npm run bar
 - **设置…** —— 取色器自定义五种状态颜色、圆点上限、阈值、数据目录、小条背景
 - **退出**
 
-> ⚠️ 这是 Electron 的置顶悬浮窗「贴」在桌面/任务栏上，不是真正的任务栏嵌入（真嵌入需 C++ hack 任务栏窗口）。默认用**真透明窗**（胶囊只包住圆点、其余全透），并自动关闭 GPU 硬件合成——这是真透明窗在部分 Windows 上「整窗看不见」的根因，走软件合成路径后透明可靠生效。若仍看不见，可用 `start-bar.bat` 换 `--opaque` 退回不透明深色胶囊，或用 `start-bar-debug.bat` 诊断。小条会每 0.6s 自动重新置顶，防止任务栏抢层级把它盖住。设置存在 `%APPDATA%/claude-agent-monitor/config.json`。
+> ⚠️ 这是 Electron 的置顶悬浮窗「贴」在桌面/任务栏上，不是真正的任务栏嵌入（真嵌入需 C++ hack 任务栏窗口）。默认用**真透明窗**（胶囊只包住圆点、其余全透），并自动关闭 GPU 硬件合成——这是真透明窗在部分 Windows 上「整窗看不见」的根因，走软件合成路径后透明可靠生效。若仍看不见，可用 `scripts/start-bar.bat` 换 `--opaque` 退回不透明深色胶囊，或用 `scripts/start-bar-debug.bat` 诊断。小条会每 0.6s 自动重新置顶，防止任务栏抢层级把它盖住。设置存在 `%APPDATA%/claude-agent-monitor/config.json`。
 
 ### 打包成 exe（免安装绿色版）
 

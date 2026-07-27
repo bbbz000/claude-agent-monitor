@@ -1,5 +1,7 @@
 @echo off
-cd /d "%~dp0"
+rem 一键启动任务栏小条（首次会自动 npm install）。
+rem 脚本在 scripts/ 下，工作目录切到工程根（%~dp0 的上一级）。
+cd /d "%~dp0.."
 
 rem --nopause：由 start-bar-hidden.vbs（隐藏窗口）传入，出错时不 pause（隐藏窗口下 pause 会永久卡死）
 set "NOPAUSE="

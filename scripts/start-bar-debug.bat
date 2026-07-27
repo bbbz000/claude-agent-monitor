@@ -1,5 +1,7 @@
 @echo off
-cd /d "%~dp0"
+rem 诊断模式启动小条（看不见时用：亮底 + DevTools + 日志）。
+rem 脚本在 scripts/ 下，工作目录切到工程根（%~dp0 的上一级）。
+cd /d "%~dp0.."
 
 where node >nul 2>nul
 if errorlevel 1 (

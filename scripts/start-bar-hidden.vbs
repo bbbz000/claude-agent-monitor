@@ -10,6 +10,7 @@
 '
 ' NOTE: keep this file ASCII-only. cscript/wscript parse .vbs as the system
 ' ANSI codepage, so non-ASCII comments can corrupt parsing.
+' start-bar.bat lives in the same folder (scripts/) as this script.
 
 Dim shell, fso, here, bat, rc
 Set shell = CreateObject("WScript.Shell")

@@ -5,6 +5,22 @@
   "type": "module",
   "main": "electron/main.js",
   "author": "claude-agent-monitor",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bbbz000/claude-agent-monitor.git"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "monitor",
+    "agent",
+    "electron",
+    "taskbar"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "monitor": "node monitor.js",
     "sessions": "node sessions.js",
