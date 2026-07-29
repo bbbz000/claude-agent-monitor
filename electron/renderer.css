@@ -11,9 +11,10 @@ html, body {
   cursor: default;
 }
 
-/* 不透明窗模式：胶囊铺满整窗、去圆角，避免圆角处露出窗口底色方块 */
+/* 不透明窗模式（--opaque 兜底）：窗口底色是实心的，圆角会露出角上的底色方块，故仍去圆角 */
 body.opaque #bar {
   border-radius: 0;
+  border: none;
 }
 
 #bar {
@@ -24,7 +25,9 @@ body.opaque #bar {
   justify-content: center;
   /* 胶囊背景由 JS 按 config.barBackground 设置到 --bar-bg */
   background: var(--bar-bg, rgba(0, 0, 0, 0.35));
-  border-radius: 17px;
+  /* 圆角矩形托盘 + 一圈描边，和内部竖直胶囊风格统一 */
+  border-radius: 10px;
+  border: 0px solid rgba(255, 255, 255, 0.25);
   /* 默认不可拖：仅在 body.draggable（勾选“自由拖动”）时开启 drag 区域 */
   -webkit-app-region: no-drag;
   cursor: default;
@@ -41,13 +44,14 @@ body.draggable #dots {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 10px;
+  padding: 0 5px;
 }
 
+/* 竖直胶囊：窄而高、全圆角；颜色仍按状态语义走 --c */
 .dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
+  width: 8px;
+  height: 20px;
+  border-radius: 4px;
   background: var(--c, #6b7280);
   flex: 0 0 auto;
   transition: background-color 0.2s ease;

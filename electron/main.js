@@ -27,12 +27,12 @@ const OPAQUE_BG = "#1b1b24";
 // 小条尺寸（DIP）。宽度按当前圆点单位数动态伸缩（右边缘固定），最少保留 1 个单位。
 const BAR_HEIGHT = 34;
 const DOT_SLOT = 20;   // 每个圆点占位宽（含间隔）
-const BAR_PADDING = 20; // 胶囊左右内边距合计
+const BAR_PADDING = 6; // 胶囊左右内边距合计
 
 // 给定“圆点单位数”算胶囊宽度（含左右内边距）。units 至少按 1 计（空态灰点）。
 function barWidthForUnits(units) {
   const u = Math.max(1, units);
-  return Math.max(60, u * DOT_SLOT + BAR_PADDING);
+  return Math.max(44, u * DOT_SLOT + BAR_PADDING);
 }
 
 // 由 state 数组推出实际会画出的圆点单位数，与 renderer.render() 的逻辑保持一致：
