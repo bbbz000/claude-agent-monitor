@@ -1,0 +1,53 @@
+// core/providers/types.js
+// Provider 接口约定 + 归一化数据结构（仅 JSDoc typedef，无运行时代码）。
+// 每个客户端适配器（claude.js / 将来的 codex.js / opencode.js）都实现下述 Provider 接口。
+//
+// 设计原则：provider 只负责「发现会话文件」+「把一个会话文件解析成客户端无关的原始信号」，
+// 绝不自己判 WORKING/RECENT——状态分档由 core/status.js 统一做，保证各客户端口径一致。
+
+/**
+ * @typedef {Object} DiscoveredSession   provider 发现的一个会话文件
+ * @property {string} file        会话文件绝对路径
+ * @property {string} sessionId   会话唯一 id（provider 内唯一即可）
+ * @property {string} project     可读的项目/工作目录路径（已解码）
+ * @property {number} mtimeMs     文件修改时间（provider 直接给，避免上层重复 stat）
+ * @property {number} size        文件字节数
+ */
+
+/**
+ * @typedef {Object} RawSignal    provider 从会话内容读出的「客户端无关」原始信号
+ * @property {string}  activity   人话活动描述（"执行命令"/"AI 回复中"…），可空
+ * @property {boolean} done       本轮是否已结束（AI 回复完 end_turn 等）
+ * @property {boolean} waiting    是否在等用户确认/回答（阻塞式，不受时间影响）
+ */
+
+/**
+ * @typedef {Object} SessionMeta
+ * @property {string} title       会话标题
+ */
+
+/**
+ * @typedef {Object} ProbeResult  设置界面「检测」用；各 provider 返回统一形状
+ * @property {string}  root       解析出的会话根目录绝对路径
+ * @property {string}  source     路径来源标记（"manual"/"env"/"default" 等，provider 自定义）
+ * @property {boolean} exists
+ * @property {boolean} isDir
+ * @property {number}  sessionCount
+ * @property {?string} error
+ */
+
+/**
+ * @typedef {Object} Provider
+ * @property {string}  id           稳定标识，如 "claude" / "codex"
+ * @property {string}  label        展示名，如 "Claude Code"
+ * @property {(cfg: Object) => DiscoveredSession[]} discover
+ *           发现该客户端所有会话文件（自己解析目录布局）。cfg 是从全局 config 切给该 provider 的那份。
+ * @property {(file: string) => SessionMeta} parseMeta
+ *           读文件头拿标题（缓存由 provider 自己管，因格式各异）
+ * @property {(file: string, size: number) => RawSignal} parseActivity
+ *           读文件尾推断当前活动 + done/waiting
+ * @property {(cfg: Object) => ProbeResult} [probe]
+ *           可选：设置界面「检测路径」用
+ */
+
+export {}; // 纯类型模块，无导出实体
