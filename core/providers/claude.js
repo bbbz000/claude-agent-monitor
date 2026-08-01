@@ -29,20 +29,34 @@ function decodeProject(name) {
 }
 
 // ── 标题解析（读文件头，带缓存）───────────────────────
-const headCache = new Map(); // sid -> {title}
-function parseMetaFor(fp, sid) {
+// 读一次文件头，解析出标题所需字段 + 历史列表需要的额外字段（cwd/gitBranch/startTime/firstMsg）。
+// parseMeta（只要 title，供 scan 判活）与 parseFullMeta（全字段，供 sessions 历史列表）共享它。
+const headCache = new Map(); // sid -> full meta（含 title + 额外字段）
+function readHeadMeta(fp, sid) {
   if (headCache.has(sid)) return headCache.get(sid);
-  let title = "", ai = "", firstMsg = "";
+  let title = "", ai = "", firstMsg = "", cwd = "", gitBranch = "", startTime = "";
   for (const ln of readHead(fp).split("\n").filter(Boolean).slice(0, 20)) {
     let o; try { o = JSON.parse(ln); } catch { continue; }
     if (o.type === "custom-title" && o.customTitle) title = o.customTitle;
     else if (o.type === "ai-title" && o.aiTitle) ai = o.aiTitle;
     if (!firstMsg && o.type === "user" && o.message) firstMsg = extractText(o.message.content);
     if (!firstMsg && o.type === "queue-operation" && o.content) firstMsg = o.content;
+    if (!cwd && o.cwd) cwd = o.cwd;
+    if (!gitBranch && o.gitBranch) gitBranch = o.gitBranch;
+    if (!startTime && o.timestamp) startTime = o.timestamp;
   }
-  const meta = { title: title || ai || firstMsg.trim() || "(无标题)" };
+  const meta = {
+    title: title || ai || firstMsg.trim() || "(无标题)",
+    firstMsg: firstMsg.trim(),
+    cwd, gitBranch, startTime,
+  };
   headCache.set(sid, meta);
   return meta;
+}
+
+// 只取判活/显示用的标题（scan 走这条）
+function parseMetaFor(fp, sid) {
+  return { title: readHeadMeta(fp, sid).title };
 }
 
 // ── 活动细分 ─────────────────────────────────────────
@@ -117,6 +131,7 @@ function discover(cfg = {}) {
         file: fp,
         sessionId: fn.replace(/\.jsonl$/, ""),
         project: decodeProject(proj),
+        projectKey: proj,          // 原始编码目录名，供按内部键过滤
         mtimeMs: fst.mtimeMs,
         size: fst.size,
       });
@@ -156,6 +171,7 @@ const claudeProvider = {
   label: "Claude Code",
   discover,
   parseMeta: (file) => parseMetaFor(file, path.basename(file).replace(/\.jsonl$/, "")),
+  parseFullMeta: (file) => readHeadMeta(file, path.basename(file).replace(/\.jsonl$/, "")),
   parseActivity: parseActivityFor,
   probe,
 };

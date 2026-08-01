@@ -1,11 +1,10 @@
-import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { resolveProjectsRoot } from "./core/scanner.js";
+import { allProviders } from "./core/providers/registry.js";
 
-// Claude Code / Desktop agent 会话都以 .jsonl 存在 <.claude>/projects/<项目>/<sessionId>.jsonl
-// 复用 scanner 的解析：自动适配 CLAUDE_CONFIG_DIR 环境变量，否则默认 ~/.claude。
-const PROJECTS_ROOT = resolveProjectsRoot();
+// 历史 session 列表：遍历所有 provider（含未启用的——查历史与启用状态无关），
+// 用各自的 discover() 发现会话文件、parseFullMeta() 拿完整元信息。
+// 解析逻辑全在 provider 里，本文件不再自带 readHead/parseSession（P2 消除重复）。
 
 const COLORS = {
   reset: "\x1b[0m",
@@ -16,97 +15,34 @@ const COLORS = {
   yellow: "\x1b[33m",
 };
 
-// 只读文件头部若干字节，避免把上百 KB 的会话整个载入
-function readHead(file, bytes = 65536) {
-  const fd = fs.openSync(file, "r");
-  try {
-    const buf = Buffer.alloc(bytes);
-    const len = fs.readSync(fd, buf, 0, bytes, 0);
-    return buf.toString("utf-8", 0, len);
-  } finally {
-    fs.closeSync(fd);
-  }
-}
-
-function extractText(content) {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) return content.map((c) => c.text || "").join("");
-  return "";
-}
-
-// 把 projects 目录名（C--Users-...）尽量还原成可读路径
-function decodeProject(name) {
-  return name.replace(/^([A-Za-z])--/, "$1:/").replace(/-/g, "/");
-}
-
-function parseSession(filePath, sessionId) {
-  const stat = fs.statSync(filePath);
-  const lines = readHead(filePath).split("\n").filter(Boolean);
-
-  let title = "";       // custom-title 优先，其次 ai-title
-  let aiTitle = "";
-  let firstMsg = "";
-  let cwd = "";
-  let gitBranch = "";
-  let startTime = "";
-
-  for (const line of lines.slice(0, 20)) {
-    let o;
-    try {
-      o = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (o.type === "custom-title" && o.customTitle) title = o.customTitle;
-    else if (o.type === "ai-title" && o.aiTitle) aiTitle = o.aiTitle;
-    if (!firstMsg && o.type === "user" && o.message) firstMsg = extractText(o.message.content);
-    if (!firstMsg && o.type === "queue-operation" && o.content) firstMsg = o.content;
-    if (!cwd && o.cwd) cwd = o.cwd;
-    if (!gitBranch && o.gitBranch) gitBranch = o.gitBranch;
-    if (!startTime && o.timestamp) startTime = o.timestamp;
-  }
-
-  return {
-    sessionId,
-    title: title || aiTitle || firstMsg.trim() || "(无标题)",
-    firstMsg: firstMsg.trim(),
-    cwd,
-    gitBranch,
-    startTime,
-    mtime: stat.mtime,
-    size: stat.size,
-    file: filePath,
-  };
-}
-
 export function listSessions() {
   const sessions = [];
-  if (!fs.existsSync(PROJECTS_ROOT)) return sessions;
-
-  for (const proj of fs.readdirSync(PROJECTS_ROOT)) {
-    const dir = path.join(PROJECTS_ROOT, proj);
-    let stat;
-    try {
-      stat = fs.statSync(dir);
-    } catch {
-      continue;
-    }
-    if (!stat.isDirectory()) continue;
-
-    for (const fn of fs.readdirSync(dir)) {
-      if (!fn.endsWith(".jsonl")) continue;
-      const fp = path.join(dir, fn);
+  for (const p of allProviders()) {
+    let discovered;
+    try { discovered = p.discover({}); } catch { continue; } // 单个 provider 挂了不影响其他
+    for (const d of discovered) {
       try {
-        const s = parseSession(fp, fn.replace(/\.jsonl$/, ""));
-        s.project = proj;
-        s.projectPath = decodeProject(proj);
-        sessions.push(s);
+        // parseFullMeta 拿全字段；provider 若未实现则退回 parseMeta（只有 title）
+        const meta = p.parseFullMeta ? p.parseFullMeta(d.file) : p.parseMeta(d.file);
+        sessions.push({
+          provider: p.id,
+          sessionId: d.sessionId,
+          title: meta.title,
+          firstMsg: meta.firstMsg || "",
+          cwd: meta.cwd || "",
+          gitBranch: meta.gitBranch || "",
+          startTime: meta.startTime || "",
+          mtime: new Date(d.mtimeMs),
+          size: d.size,
+          file: d.file,
+          projectPath: d.project,
+          projectKey: d.projectKey || "", // 原始内部键（如 Claude 编码目录名），供过滤
+        });
       } catch {
         // 跳过损坏文件
       }
     }
   }
-
   sessions.sort((a, b) => b.mtime - a.mtime);
   return sessions;
 }
@@ -132,18 +68,18 @@ if (invokedDirectly) {
   })();
 
   let sessions = listSessions();
-  if (filter) sessions = sessions.filter((s) => s.projectPath.includes(filter) || s.project.includes(filter));
+  if (filter) sessions = sessions.filter((s) => (s.projectPath || "").includes(filter) || (s.projectKey || "").includes(filter));
 
   if (asJson) {
     console.log(JSON.stringify(sessions.slice(0, limit), null, 2));
   } else {
     const C = COLORS;
-    console.log(`${C.cyan}${C.bold}Claude Agent Sessions${C.reset}  ${C.dim}(共 ${sessions.length} 个，显示前 ${Math.min(limit, sessions.length)} 个)${C.reset}\n`);
+    console.log(`${C.cyan}${C.bold}Agent Sessions${C.reset}  ${C.dim}(共 ${sessions.length} 个，显示前 ${Math.min(limit, sessions.length)} 个)${C.reset}\n`);
     for (const s of sessions.slice(0, limit)) {
       const t = s.mtime.toISOString().slice(0, 16).replace("T", " ");
       const kb = (s.size / 1024).toFixed(0).padStart(4) + "KB";
       console.log(
-        `${C.dim}${t}${C.reset}  ${C.green}${s.sessionId.slice(0, 8)}${C.reset}  ${C.dim}${kb}${C.reset}  ${C.bold}${s.title.slice(0, 50)}${C.reset}`
+        `${C.dim}${t}${C.reset}  ${C.yellow}[${s.provider}]${C.reset} ${C.green}${s.sessionId.slice(0, 8)}${C.reset}  ${C.dim}${kb}${C.reset}  ${C.bold}${s.title.slice(0, 50)}${C.reset}`
       );
       console.log(`${C.dim}            └ ${s.projectPath}${s.gitBranch ? "  @" + s.gitBranch : ""}${C.reset}`);
     }

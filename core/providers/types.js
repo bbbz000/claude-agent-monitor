@@ -10,6 +10,8 @@
  * @property {string} file        会话文件绝对路径
  * @property {string} sessionId   会话唯一 id（provider 内唯一即可）
  * @property {string} project     可读的项目/工作目录路径（已解码）
+ * @property {string} [projectKey] 可选：provider 内部的原始项目标识（如 Claude 的编码目录名）。
+ *           仅供过滤等按内部键匹配用；展示一律用 project。
  * @property {number} mtimeMs     文件修改时间（provider 直接给，避免上层重复 stat）
  * @property {number} size        文件字节数
  */
@@ -24,6 +26,15 @@
 /**
  * @typedef {Object} SessionMeta
  * @property {string} title       会话标题
+ */
+
+/**
+ * @typedef {Object} FullMeta     历史列表用的完整元信息（parseFullMeta 返回）
+ * @property {string} title
+ * @property {string} firstMsg    首条用户消息（截断显示用）
+ * @property {string} cwd         工作目录
+ * @property {string} gitBranch   git 分支
+ * @property {string} startTime   首条消息时间戳（ISO）
  */
 
 /**
@@ -44,6 +55,9 @@
  *           发现该客户端所有会话文件（自己解析目录布局）。cfg 是从全局 config 切给该 provider 的那份。
  * @property {(file: string) => SessionMeta} parseMeta
  *           读文件头拿标题（缓存由 provider 自己管，因格式各异）
+ * @property {(file: string) => FullMeta} [parseFullMeta]
+ *           可选：读文件头拿历史列表所需的完整元信息（title + cwd/gitBranch/startTime/firstMsg）。
+ *           sessions.js 用；未实现则退回 parseMeta（只有 title）。
  * @property {(file: string, size: number) => RawSignal} parseActivity
  *           读文件尾推断当前活动 + done/waiting
  * @property {(cfg: Object) => ProbeResult} [probe]
