@@ -150,7 +150,9 @@ function probe(cfg = {}) {
     const st = fs.statSync(root);
     res.exists = true;
     res.isDir = st.isDirectory();
-    if (!res.isDir) return res;
+    // Claude 的会话根应是【目录】(projects/)。若指到文件 → 明确报错，
+    // 供前端按 error 显示失败（前端已中性化，不再自行判 isDir）。
+    if (!res.isDir) { res.error = "该路径不是目录（应指向 .claude 下的 projects 目录）"; return res; }
     for (const proj of fs.readdirSync(root)) {
       const dir = path.join(root, proj);
       let dst; try { dst = fs.statSync(dir); } catch { continue; }

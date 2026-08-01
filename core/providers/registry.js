@@ -1,11 +1,11 @@
 // core/providers/registry.js
 // 注册表：provider 的唯一真相源。加一个新客户端 = import + 往 ALL 加一项，别处不用动。
 import claude from "./claude.js";
+import opencode from "./opencode.js";
 // import codex from "./codex.js";       // 将来
-// import opencode from "./opencode.js"; // 将来
 
 /** @type {import('./types.js').Provider[]} */
-const ALL = [claude /*, codex, opencode */];
+const ALL = [claude, opencode /*, codex */];
 
 /**
  * 返回启用的 provider 列表。

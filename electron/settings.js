@@ -21,16 +21,17 @@ function renderProbe(el, r) {
   el.textContent = "";
   if (!r) { el.appendChild(span("bad", "✗ 该数据源不支持检测")); return; }
 
+  // 中性判定：不假设数据源是目录还是文件（Claude 指向 projects/ 目录、OpenCode 指向 opencode.db 文件）。
+  // 有效 = 存在且无错；具体「目录/文件」形态由各 provider 自己决定，前端不再拿 isDir 卡。
   const line1 = document.createElement("div");
   if (r.error) line1.appendChild(span("bad", `✗ 检测出错：${r.error}`));
-  else if (!r.exists) line1.appendChild(span("bad", "✗ 目录不存在"));
-  else if (!r.isDir) line1.appendChild(span("bad", "✗ 该路径不是目录"));
+  else if (!r.exists) line1.appendChild(span("bad", "✗ 数据源不存在"));
   else if (r.sessionCount === 0) {
-    line1.appendChild(span("ok", "✓ 目录有效"));
-    line1.appendChild(document.createTextNode("，但未发现会话文件"));
+    line1.appendChild(span("ok", "✓ 数据源有效"));
+    line1.appendChild(document.createTextNode("，但未发现会话"));
   } else {
-    line1.appendChild(span("ok", "✓ 目录有效"));
-    line1.appendChild(document.createTextNode(`，发现 ${r.sessionCount} 个会话文件`));
+    line1.appendChild(span("ok", "✓ 数据源有效"));
+    line1.appendChild(document.createTextNode(`，发现 ${r.sessionCount} 个会话`));
   }
   el.appendChild(line1);
 

@@ -9,6 +9,7 @@ export function getDefaults() {
     providers: null,                 // 启用的 provider id 列表；null=全部启用（首次/旧配置），[]=全关
     providerConfigs: {               // 各 provider 各自的配置，形状由 provider 定义
       claude: { configDir: "" },     //   Claude 的 .claude 根覆盖；空=自动
+      opencode: { logPath: "" },     //   OpenCode 的 opencode.log 路径覆盖；空=自动（~/.local/share/opencode/log）
     },
     position: "workarea-bottom-right", // 默认贴任务栏正上方（不与任务栏抢层级，最稳）
     draggable: false,                // 是否允许自由拖动（唯一开关；true 时才可拖 + 走 free 定位）
