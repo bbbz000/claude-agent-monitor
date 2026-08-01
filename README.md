@@ -1,25 +1,25 @@
 # Claude Agent Monitor
 
-实时监控本地 **Claude Code / Claude Desktop agent 会话**的状态，无需任何 MCP 配置或让 Claude 主动上报。提供两种前端：
+实时监控本地 **AI Agent 会话**的状态，无需任何 MCP 配置或让 agent 主动上报。当前支持 **Claude Code / Desktop** 与 **OpenCode Desktop** 两种客户端，采用可扩展的 **provider 架构**——加一个新客户端 = 新增一个 provider 文件 + 注册表里加一行，前端与判活核心都不用动。提供两种前端：
 
 - **终端面板**（`monitor.js`）：完整列表，看每个 agent 的标题、项目、当前活动。零依赖。
 - **任务栏悬浮小条**（`electron/`）：贴在任务栏上的一排圆点，1 个圆点 = 1 个活跃 agent，颜色代表状态——像红绿灯，一眼扫过。需 Electron。
 
 ## 工作原理
 
-Claude Code / Desktop 的每个 agent 会话都以 `.jsonl` 文件明文存在本地：
+本工具是**多数据源被动观测**：每个客户端由一个 **provider** 适配，各自去读该客户端在本地留下的痕迹，最后汇总成统一的会话状态（WORKING / WAITING / DONE / RECENT）。不同客户端把状态写在不同地方，判活方式也不同——但对上层前端完全透明。
+
+### Claude Code / Desktop（读 `.jsonl` + mtime）
+
+Claude 的每个 agent 会话都以 `.jsonl` 文件明文存在本地：
 
 ```
 ~/.claude/projects/<项目目录>/<sessionId>.jsonl
 ```
 
-会话每产生一条消息，对应文件就被写入一次。本工具**纯靠扫描这些文件的修改时间（mtime）来判断 agent 是否活跃**——被动观测，零侵入，不依赖任何上报机制。
+会话每产生一条消息，对应文件就被写入一次。所以**纯靠扫描这些文件的修改时间（mtime）来判断是否活跃**——被动观测，零侵入。
 
 > 目录**自动适配**：默认扫 `~/.claude/projects`；若你用环境变量 `CLAUDE_CONFIG_DIR` 自定义过 Claude 数据位置，会自动跟随。也可在小条「设置…」里手动指定 `.claude` 根目录（见下）。
-
-```
-~/.claude/projects/**/*.jsonl  ──扫描 mtime──>  monitor.js（终端面板）
-```
 
 判活规则：先按文件修改时间（mtime）分档，再读文件尾部最后一条记录细分状态。
 
@@ -35,19 +35,50 @@ Claude Code / Desktop 的每个 agent 会话都以 `.jsonl` 文件明文存在�
 
 > WAITING（等你确认）依据的是 `AskUserQuestion` 和退出计划模式这类**会写进 .jsonl** 的“等待用户”工具。Claude Code 的**权限弹窗**（“是否允许运行此命令”）不写文件，从 mtime 无法区分，故不覆盖。
 
+### OpenCode Desktop（读 `opencode.log`）
+
+OpenCode 把会话存在一个 SQLite 库里，但那是**原子落库**——AI 正在思考/流式回复的那段时间，库里零写入、mtime 不动，轮询数据库根本抓不到「进行中」窗口（灯只会卡黄）。好在 OpenCode 的后台 server 会**实时把状态写进日志**：
+
+```
+~/.local/share/opencode/log/opencode.log
+```
+
+日志里每一轮工作的生命周期非常干净，本工具据此按 `session.id` 求每个会话**最后一条活动事件**判活：
+
+| 日志事件 | 状态 | 含义 |
+|------|------|------|
+| `stream` / `loop` / `process` | ● WORKING | 正在生成 / 调工具 / 多步推进 |
+| `exiting loop` | ✓ DONE | 本轮收尾 |
+
+新鲜度（RECENT 判档）用**日志事件的时间戳**，因此流式期间日志一直在写、灯稳定变绿——这正是纯读数据库抓不到的窗口。
+
+> **已知取舍**（纯日志方案的代价）：
+> - 日志会滚动，**历史会话列表只覆盖日志窗口内出现过的会话**（不像 Claude 那样全量持久）。
+> - 会话**真实标题**（聊天后生成、只写进数据库）不在日志里；窗口外的会话标题退化为**项目目录名**或占位。
+> - 本版**不支持 WAITING**——OpenCode 日志无 `AskUserQuestion` 那种显式「等待用户」信号。
+>
+> 好处：**零原生依赖**（不需要 SQLite 驱动 / native rebuild）。默认日志路径自动检测，也可在设置里改 `logPath`。
+
 ## 文件结构
 
 ```
 claude-agent-monitor/
 ├── core/
-│   └── scanner.js  # 判活核心：扫描 .jsonl、推断状态（终端版与小条版共享）
+│   ├── scanner.js       # 判活核心：遍历各 provider、汇总统一状态（终端版与小条版共享）
+│   ├── status.js        # 状态分档：把 provider 的原始信号映射为 WORKING/WAITING/DONE/RECENT
+│   └── providers/       # 数据源适配器（每个客户端一个文件，纯 Node、零前端依赖）
+│       ├── registry.js      # 注册表：provider 的唯一真相源（加客户端 = import + 加一行）
+│       ├── claude.js        # Claude Code / Desktop：读 .jsonl + mtime
+│       ├── opencode.js      # OpenCode Desktop：读 opencode.log
+│       ├── _shared.js       # provider 间复用的只读小工具（读文件头/尾等）
+│       └── types.js         # Provider / ConfigField 类型声明（JSDoc）
 ├── monitor.js      # 多 agent 实时终端面板
 ├── sessions.js     # 列出全部历史 session
 ├── electron/       # 任务栏悬浮小条（Electron）
 │   ├── main.js         # 主进程：建窗 + 定时扫描 + 多屏定位 + 拖动 + 托盘菜单
 │   ├── preload.cjs     # 安全桥（contextIsolation）
 │   ├── renderer.*      # 小条 UI：画圆点 / 折叠 / 上色
-│   ├── settings.*      # 设置窗口（取色器 + 阈值）
+│   ├── settings.*      # 设置窗口（取色器 + 阈值 + 各数据源配置，按 provider schema 自动渲染）
 │   └── config.js       # 配置读写
 ├── scripts/            # 一键启动脚本
 │   ├── start.bat            # 启动终端面板
@@ -66,6 +97,8 @@ claude-agent-monitor/
 
 - **终端面板**：Node.js >= 18（仅用内置模块，**无第三方依赖，无需 npm install**）
 - **任务栏小条**：额外需要 Electron（`scripts/start-bar.bat` 首次运行会自动 `npm install`）
+
+> 所有 provider 都是**纯 Node、零运行时第三方依赖**（含 OpenCode——它读日志文本，不需要 SQLite 驱动或原生模块 rebuild）。`package.json` 的 `dependencies` 为空；Electron 仅作为小条的运行时/打包工具，列在 `devDependencies`。
 
 ### 启动实时监控面板
 
@@ -123,7 +156,7 @@ npm run bar
 
 - **自由拖动** —— 开关：勾选后可任意拖动小条并记住位置；取消勾选跳回任务栏右下
 - **活跃阈值** —— 1 / 2 / 5 / 10 分钟（超过则不再显示）
-- **设置…** —— 取色器自定义五种状态颜色、圆点上限、阈值、数据目录、小条背景
+- **设置…** —— 取色器自定义五种状态颜色、圆点上限、阈值、小条背景；以及**各数据源**（provider）的独立开关、路径填写与「检测」按钮（配置项由每个 provider 自己声明，界面自动渲染）
 - **退出**
 
 > ⚠️ 这是 Electron 的置顶悬浮窗「贴」在桌面/任务栏上，不是真正的任务栏嵌入（真嵌入需 C++ hack 任务栏窗口）。默认用**真透明窗**（胶囊只包住圆点、其余全透），并自动关闭 GPU 硬件合成——这是真透明窗在部分 Windows 上「整窗看不见」的根因，走软件合成路径后透明可靠生效。若仍看不见，可用 `scripts/start-bar.bat` 换 `--opaque` 退回不透明深色胶囊，或用 `scripts/start-bar-debug.bat` 诊断。小条会每 0.6s 自动重新置顶，防止任务栏抢层级把它盖住。设置存在 `%APPDATA%/claude-agent-monitor/config.json`。
@@ -160,7 +193,15 @@ node sessions.js --project LDL   # 按项目路径过滤
 | `REFRESH_MS` | 2000 | 面板刷新间隔（毫秒） |
 | `MAX_ROWS` | 15 | 最多显示多少个 agent |
 
-**任务栏小条**：改托盘菜单「设置…」即可，或直接编辑 `%APPDATA%/claude-agent-monitor/config.json`（`displayId` / `configDir`（Claude `.claude` 根目录覆盖，留空=自动检测 `CLAUDE_CONFIG_DIR` / 默认 `~/.claude`）/ `position` / `freePos`（自由拖动锚点 `{right,y}`，右边缘+顶边）/ `offset` / `colors` / `maxDots` / `workingSec` / `recentSec` / `barBackground` / `refreshMs`）。
+**任务栏小条**：改托盘菜单「设置…」即可，或直接编辑 `%APPDATA%/claude-agent-monitor/config.json`：
+
+| 字段 | 说明 |
+|------|------|
+| `providers` | 启用的 provider id 列表（如 `["claude","opencode"]`）；`null`=全部启用，`[]`=全关 |
+| `providerConfigs` | 各 provider 各自的配置：`claude.configDir`（`.claude` 根覆盖，留空=自动检测 `CLAUDE_CONFIG_DIR` / 默认 `~/.claude`）、`opencode.logPath`（`opencode.log` 路径覆盖，留空=自动检测） |
+| `displayId` / `position` / `freePos` / `offset` | 显示器、定位、自由拖动锚点 `{right,y}`、像素微调 |
+| `colors` / `maxDots` / `barBackground` | 五种状态颜色、圆点上限、小条背景 |
+| `workingSec` / `recentSec` / `refreshMs` | WORKING 阈值、RECENT 阈值、刷新间隔 |
 
 ## 扩展：对接硬件 / 其他前端
 
@@ -171,7 +212,16 @@ node sessions.js --project LDL   # 按项目路径过滤
 
 任务栏小条（`electron/main.js`）本身就是这个模式的一个实例：它 `import` 同一个 `scan()`，只把 `state` 数组推给渲染层。
 
+### 加新 client（接一个新数据源）
+
+判活核心（`core/status.js` 的 `classify()`）与两个前端都对 client **无感**——它们只吃统一的 `RawSignal`（`{ activity, done, waiting }`）。所以接一个新客户端只需两步：
+
+1. 在 `core/providers/` 下新增一个文件，实现一个 **provider**：`discover(cfg)` 列出会话、`parseMeta` / `parseFullMeta` / `parseActivity` 解析标题与活动信号、`probe(cfg)` 供设置界面「检测」，外加一份 `configSchema`（声明式配置字段，设置界面据此自动渲染路径框/开关）。
+2. 在 `core/providers/registry.js` 的 `ALL` 数组里加一行注册它。
+
+**前端与判活核心一行都不用改**——OpenCode 正是照这个模式接进来的（`core/providers/opencode.js` + 注册表里一行）。
+
 ## 说明
 
 - 本工具只**读取**本地会话文件，不修改、不上传任何内容。
-- 仅覆盖存在本地的 agent 会话（Claude Code / Desktop agent 模式）。claude.ai 普通网页对话的数据在服务器上，不在本工具范围内。
+- 覆盖各 provider 支持的本地会话（Claude Code / Desktop、OpenCode Desktop）。claude.ai 普通网页对话的数据在服务器上，不在本工具范围内。
