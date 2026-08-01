@@ -22,9 +22,9 @@ contextBridge.exposeInMainWorld("tip", {
 
 // 设置窗口专用桥
 contextBridge.exposeInMainWorld("settingsAPI", {
-  onInit: (cb) => ipcRenderer.on("settings:init", (_e, config) => cb(config)),
+  onInit: (cb) => ipcRenderer.on("settings:init", (_e, config, providerMeta) => cb(config, providerMeta)),
   save: (config) => ipcRenderer.send("settings:save", config),
   close: () => ipcRenderer.send("settings:close"),
-  // 检测某个 configDir 覆盖值：请求→响应（main 用 fs 只读检测后回传）
-  probe: (configDir) => ipcRenderer.invoke("settings:probe", configDir),
+  // 检测某 provider 的数据目录：请求→响应（main 用 fs 只读检测后回传）
+  probe: (providerId, providerCfg) => ipcRenderer.invoke("settings:probe", providerId, providerCfg),
 });

@@ -3,7 +3,8 @@
 // 默认用不透明胶囊窗（真透明窗在部分 Windows 上不合成会整窗看不见）；--transparent 可试真透明。
 import { app, BrowserWindow, ipcMain, Menu, Tray, screen, nativeImage } from "electron";
 import path from "path";
-import { scan, probeProjectsRoot } from "../core/scanner.js";
+import { scan } from "../core/scanner.js";
+import { allProviders, listMeta } from "../core/providers/registry.js";
 import { load, save, resolveDisplay } from "./config.js";
 
 const DIR = import.meta.dirname;
@@ -266,7 +267,12 @@ function keepOnTop() {
 function tick() {
   if (!barWin || barWin.isDestroyed()) return;
   try {
-    const rows = scan({ workingSec: config.workingSec, recentSec: config.recentSec, configDir: config.configDir });
+    const rows = scan({
+      workingSec: config.workingSec,
+      recentSec: config.recentSec,
+      providers: config.providers,
+      providerConfigs: config.providerConfigs,
+    });
     lastRows = rows; // 存完整结果供 hover 查详情（隐私：只在悬停时才把单条推给气泡窗）
     const states = rows.map((r) => r.state);
     if (DIAG) console.log("[bar] tick states=", JSON.stringify(states), "(", states.length, "agents )");
@@ -386,7 +392,8 @@ function openSettings() {
   });
   settingsWin.loadFile(path.join(DIR, "settings.html"));
   settingsWin.once("ready-to-show", () => {
-    settingsWin.webContents.send("settings:init", config);
+    // 连同全部 provider 元信息一起下发，供设置界面动态列出「数据源」开关
+    settingsWin.webContents.send("settings:init", config, listMeta());
   });
   settingsWin.on("closed", () => { settingsWin = null; });
 }
@@ -401,6 +408,25 @@ ipcMain.on("tip:unhover", () => hideTip());
 
 ipcMain.on("settings:save", (_e, incoming) => {
   // 白名单合并：只接受已知字段，防止渲染层塞脏数据
+  // providers：只保留真实存在的 provider id（防伪造）；空数组=用户显式全关，保留其语义
+  const knownIds = new Set(allProviders().map((p) => p.id));
+  let providers = config.providers;
+  if (Array.isArray(incoming.providers)) {
+    providers = incoming.providers.filter((id) => knownIds.has(id));
+  }
+  // providerConfigs：逐 provider 取字符串路径覆盖，只认已知 id
+  const providerConfigs = { ...config.providerConfigs };
+  if (incoming.providerConfigs && typeof incoming.providerConfigs === "object") {
+    for (const id of knownIds) {
+      const inc = incoming.providerConfigs[id];
+      if (inc && typeof inc === "object") {
+        providerConfigs[id] = {
+          ...providerConfigs[id],
+          configDir: typeof inc.configDir === "string" ? inc.configDir.trim() : (providerConfigs[id] || {}).configDir || "",
+        };
+      }
+    }
+  }
   const next = {
     ...config,
     colors: { ...config.colors, ...(incoming.colors || {}) },
@@ -408,21 +434,23 @@ ipcMain.on("settings:save", (_e, incoming) => {
     workingSec: clampInt(incoming.workingSec, 1, 3600, config.workingSec),
     recentSec: clampInt(incoming.recentSec, 5, 86400, config.recentSec),
     barBackground: typeof incoming.barBackground === "string" ? incoming.barBackground : config.barBackground,
-    configDir: typeof incoming.configDir === "string" ? incoming.configDir.trim() : config.configDir,
+    providers,
+    providerConfigs,
   };
-  // maxDots 变化需要改窗宽 → 重定位；configDir 变化下一轮 tick 自动用新路径；refreshMs 未暴露故不重启循环
+  // maxDots 变化需要改窗宽 → 重定位；providers/路径 变化下一轮 tick 自动生效
   applyConfig(next);
-  tick(); // 立即扫一次，让改目录/阈值即时生效，不必等下一个 refreshMs
+  tick(); // 立即扫一次，让改数据源/阈值即时生效，不必等下一个 refreshMs
 });
 
 ipcMain.on("settings:close", () => {
   if (settingsWin && !settingsWin.isDestroyed()) settingsWin.close();
 });
 
-// 检测 configDir：解析路径 + 只读探测目录/文件数，回传给设置窗
-ipcMain.handle("settings:probe", (_e, configDir) => {
-  const override = typeof configDir === "string" ? configDir.trim() : "";
-  return probeProjectsRoot(override);
+// 检测某 provider 的数据目录：按 id 找 provider，调其 probe（只读探测，回传给设置窗）
+ipcMain.handle("settings:probe", (_e, providerId, providerCfg) => {
+  const p = allProviders().find((x) => x.id === providerId);
+  if (!p || typeof p.probe !== "function") return null;
+  return p.probe(providerCfg && typeof providerCfg === "object" ? providerCfg : {});
 });
 
 function clampInt(v, min, max, fallback) {

@@ -6,7 +6,10 @@ import path from "path";
 export function getDefaults() {
   return {
     displayId: null,                 // null = 主显示器；否则为 screen display.id
-    configDir: "",                   // Claude 配置目录（.claude 根）覆盖；空=自动（CLAUDE_CONFIG_DIR / 默认 ~/.claude）
+    providers: null,                 // 启用的 provider id 列表；null=全部启用（首次/旧配置），[]=全关
+    providerConfigs: {               // 各 provider 各自的配置，形状由 provider 定义
+      claude: { configDir: "" },     //   Claude 的 .claude 根覆盖；空=自动
+    },
     position: "workarea-bottom-right", // 默认贴任务栏正上方（不与任务栏抢层级，最稳）
     draggable: false,                // 是否允许自由拖动（唯一开关；true 时才可拖 + 走 free 定位）
     freePos: null,                   // 自由模式（拖动后）记住的锚点 {right,y}（右边缘+顶边）；draggable 时生效
@@ -26,16 +29,29 @@ export function getDefaults() {
   };
 }
 
-// 深合并（仅一层嵌套 colors/offset 需要合并），保证旧 config 缺字段时用默认补齐
+// 深合并（colors/offset/providerConfigs 需一层合并），保证旧 config 缺字段时用默认补齐。
+// 同时做旧配置迁移：顶层 configDir → providerConfigs.claude.configDir（用户无感）。
 function mergeDefaults(saved) {
   const d = getDefaults();
   if (!saved || typeof saved !== "object") return d;
-  return {
+  const merged = {
     ...d,
     ...saved,
     colors: { ...d.colors, ...(saved.colors || {}) },
     offset: { ...d.offset, ...(saved.offset || {}) },
+    providerConfigs: {
+      ...d.providerConfigs,
+      ...(saved.providerConfigs || {}),
+      claude: { ...d.providerConfigs.claude, ...((saved.providerConfigs || {}).claude || {}) },
+    },
   };
+  // 迁移：旧版把 Claude 目录存在顶层 configDir。若新版字段缺失，则搬进 providerConfigs.claude。
+  if (typeof saved.configDir === "string" && saved.configDir.trim() &&
+      !(saved.providerConfigs && saved.providerConfigs.claude && saved.providerConfigs.claude.configDir)) {
+    merged.providerConfigs.claude.configDir = saved.configDir.trim();
+  }
+  delete merged.configDir; // 顶层 configDir 不再保留，统一走 providerConfigs
+  return merged;
 }
 
 export function configPath(userDataDir) {
