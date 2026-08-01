@@ -24,6 +24,7 @@
   "scripts": {
     "monitor": "node monitor.js",
     "sessions": "node sessions.js",
+    "bridge": "node hardware/bridge/serial-bridge.js",
     "bar": "electron .",
     "bar:dev": "electron . --dev",
     "bar:diag": "electron . --diag --dev",
@@ -32,6 +33,9 @@
   "devDependencies": {
     "electron": "^33.0.0",
     "electron-builder": "^26.15.3"
+  },
+  "optionalDependencies": {
+    "serialport": "^12.0.0"
   },
   "build": {
     "appId": "com.claude.agent-monitor",
