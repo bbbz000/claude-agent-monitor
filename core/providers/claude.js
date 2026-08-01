@@ -169,6 +169,11 @@ function probe(cfg = {}) {
 const claudeProvider = {
   id: "claude",
   label: "Claude Code",
+  // 配置字段声明：Claude 只需一个 .claude 根目录覆盖（空=自动检测）。
+  // 设置界面据此渲染出「数据目录」路径框；probe 时整包传进来，这里只读 configDir。
+  configSchema: [
+    { key: "configDir", type: "path", label: "数据目录", placeholder: "留空自动检测" },
+  ],
   discover,
   parseMeta: (file) => parseMetaFor(file, path.basename(file).replace(/\.jsonl$/, "")),
   parseFullMeta: (file) => readHeadMeta(file, path.basename(file).replace(/\.jsonl$/, "")),

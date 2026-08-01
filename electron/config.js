@@ -34,21 +34,24 @@ export function getDefaults() {
 function mergeDefaults(saved) {
   const d = getDefaults();
   if (!saved || typeof saved !== "object") return d;
+  // providerConfigs 通用合并：逐 provider 浅合并（不写死某个 provider 一层），
+  // 各 provider 的字段形状由其 configSchema 决定，这里不假设有哪些键。
+  const mergedProviderConfigs = { ...d.providerConfigs };
+  const savedPC = (saved.providerConfigs && typeof saved.providerConfigs === "object") ? saved.providerConfigs : {};
+  for (const id of Object.keys(savedPC)) {
+    mergedProviderConfigs[id] = { ...(mergedProviderConfigs[id] || {}), ...(savedPC[id] || {}) };
+  }
   const merged = {
     ...d,
     ...saved,
     colors: { ...d.colors, ...(saved.colors || {}) },
     offset: { ...d.offset, ...(saved.offset || {}) },
-    providerConfigs: {
-      ...d.providerConfigs,
-      ...(saved.providerConfigs || {}),
-      claude: { ...d.providerConfigs.claude, ...((saved.providerConfigs || {}).claude || {}) },
-    },
+    providerConfigs: mergedProviderConfigs,
   };
   // 迁移：旧版把 Claude 目录存在顶层 configDir。若新版字段缺失，则搬进 providerConfigs.claude。
   if (typeof saved.configDir === "string" && saved.configDir.trim() &&
       !(saved.providerConfigs && saved.providerConfigs.claude && saved.providerConfigs.claude.configDir)) {
-    merged.providerConfigs.claude.configDir = saved.configDir.trim();
+    merged.providerConfigs.claude = { ...(merged.providerConfigs.claude || {}), configDir: saved.configDir.trim() };
   }
   delete merged.configDir; // 顶层 configDir 不再保留，统一走 providerConfigs
   return merged;

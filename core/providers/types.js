@@ -38,6 +38,16 @@
  */
 
 /**
+ * @typedef {Object} ConfigField  provider 声明的一个配置字段（设置界面据此通用渲染控件）。
+ *           provider 只描述「我要什么」，不关心「长什么样、怎么渲染」——渲染在 electron/settings.js。
+ * @property {string} key          存进 providerConfigs[id] 的键名，如 "configDir" / "apiKey"
+ * @property {"path"|"text"|"secret"|"select"} type  控件类型：路径框/文本框/密码框/下拉
+ * @property {string} [label]      字段标签（纯文本，textContent 渲染）
+ * @property {string} [placeholder] 输入占位符
+ * @property {{value:string,label:string}[]} [options] type==="select" 时的选项
+ */
+
+/**
  * @typedef {Object} ProbeResult  设置界面「检测」用；各 provider 返回统一形状
  * @property {string}  root       解析出的会话根目录绝对路径
  * @property {string}  source     路径来源标记（"manual"/"env"/"default" 等，provider 自定义）
@@ -51,6 +61,10 @@
  * @typedef {Object} Provider
  * @property {string}  id           稳定标识，如 "claude" / "codex"
  * @property {string}  label        展示名，如 "Claude Code"
+ * @property {ConfigField[]} [configSchema]
+ *           可选：该 provider 需要哪些配置字段。设置界面遍历它按 type 通用渲染控件。
+ *           未声明 → 该 provider 无可配置项（只有启用开关）。provider 各字段值存于
+ *           config.providerConfigs[id]，检测时整包传给 probe(cfg)。
  * @property {(cfg: Object) => DiscoveredSession[]} discover
  *           发现该客户端所有会话文件（自己解析目录布局）。cfg 是从全局 config 切给该 provider 的那份。
  * @property {(file: string) => SessionMeta} parseMeta

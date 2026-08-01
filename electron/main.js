@@ -410,23 +410,26 @@ ipcMain.on("tip:unhover", () => hideTip());
 ipcMain.on("settings:save", (_e, incoming) => {
   // 白名单合并：只接受已知字段，防止渲染层塞脏数据
   // providers：只保留真实存在的 provider id（防伪造）；空数组=用户显式全关，保留其语义
-  const knownIds = new Set(allProviders().map((p) => p.id));
+  const provs = allProviders();
+  const knownIds = new Set(provs.map((p) => p.id));
   let providers = config.providers;
   if (Array.isArray(incoming.providers)) {
     providers = incoming.providers.filter((id) => knownIds.has(id));
   }
-  // providerConfigs：逐 provider 取字符串路径覆盖，只认已知 id
+  // providerConfigs：逐 provider 按其 configSchema 声明的 key 收字符串值（只认 schema 里的键，防脏数据）
   const providerConfigs = { ...config.providerConfigs };
-  if (incoming.providerConfigs && typeof incoming.providerConfigs === "object") {
-    for (const id of knownIds) {
-      const inc = incoming.providerConfigs[id];
-      if (inc && typeof inc === "object") {
-        providerConfigs[id] = {
-          ...providerConfigs[id],
-          configDir: typeof inc.configDir === "string" ? inc.configDir.trim() : (providerConfigs[id] || {}).configDir || "",
-        };
+  const incPC = (incoming.providerConfigs && typeof incoming.providerConfigs === "object") ? incoming.providerConfigs : {};
+  for (const p of provs) {
+    const inc = incPC[p.id];
+    if (!inc || typeof inc !== "object") continue;
+    const cur = { ...(providerConfigs[p.id] || {}) };
+    for (const field of p.configSchema || []) {
+      if (Object.prototype.hasOwnProperty.call(inc, field.key)) {
+        const v = inc[field.key];
+        cur[field.key] = typeof v === "string" ? v.trim() : String(v == null ? "" : v);
       }
     }
+    providerConfigs[p.id] = cur;
   }
   const next = {
     ...config,

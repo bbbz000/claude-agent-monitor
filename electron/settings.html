@@ -43,8 +43,19 @@
     .prov-head { display: flex; align-items: center; gap: 8px; }
     .prov-head .name { flex: 1; font-weight: 600; }
     .prov-head input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
-    .prov-body { margin-top: 8px; display: flex; gap: 8px; align-items: center; }
-    .prov-body input[type="text"] { flex: 1; width: auto; }
+    /* 字段区：每个 configSchema 字段一行（标签 + 控件），标签定宽对齐 */
+    .prov-body { margin-top: 8px; }
+    .prov-field { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+    .prov-field .flabel { flex: 0 0 68px; color: #9ca3af; font-size: 11px; }
+    .prov-field input[type="text"], .prov-field input[type="password"], .prov-field select {
+      flex: 1; width: auto;
+    }
+    .prov-field select {
+      background: #2a2a3c; border: 1px solid #3f3f5a; color: #e5e7eb;
+      border-radius: 6px; padding: 5px 8px; font: inherit;
+    }
+    /* 检测按钮行：整个 provider 一个检测 */
+    .prov-probe { margin-top: 8px; display: flex; }
     .prov.disabled { opacity: 0.5; }
     .prov .probe-result { margin-top: 6px; }
     #allOffWarn { margin-top: 4px; }

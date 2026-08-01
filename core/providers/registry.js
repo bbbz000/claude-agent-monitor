@@ -24,7 +24,12 @@ export function allProviders() {
   return ALL;
 }
 
-/** 供设置界面列出全部 provider（只要展示信息，不含解析逻辑）。 */
+/** 供设置界面列出全部 provider：展示名 + 各自配置字段声明 + 是否支持检测。 */
 export function listMeta() {
-  return ALL.map((p) => ({ id: p.id, label: p.label }));
+  return ALL.map((p) => ({
+    id: p.id,
+    label: p.label,
+    configSchema: p.configSchema || [], // 设置界面据此动态渲染该 provider 的配置控件
+    hasProbe: typeof p.probe === "function", // 决定要不要画「检测」按钮
+  }));
 }

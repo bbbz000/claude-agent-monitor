@@ -45,12 +45,50 @@ function renderProbe(el, r) {
 
 // ── 数据源（provider）动态渲染 ───────────────────────
 // providers 语义：null/未设 = 全部启用；[] = 全关；否则按数组。
-let PROVIDERS = []; // [{id,label}]
+// 每个 provider 的配置控件由它自己的 configSchema 声明，这里按 field.type 通用渲染。
+let PROVIDERS = []; // [{id,label,configSchema,hasProbe}]
 const probeTimers = {};
 
 function isEnabled(config, id) {
   if (config.providers == null) return true; // null = 全启用
   return config.providers.includes(id);
+}
+
+// 字段控件 id：prov-f-<provId>-<fieldKey>，全局唯一，供收集/检测时读值
+const fieldId = (provId, key) => `prov-f-${provId}-${key}`;
+
+// 按 field.type 建一个控件（不含 label）。值一律按字符串处理。
+function buildField(provId, field, value) {
+  let el;
+  if (field.type === "select") {
+    el = document.createElement("select");
+    for (const opt of field.options || []) {
+      const o = document.createElement("option");
+      o.value = opt.value;
+      o.textContent = opt.label != null ? opt.label : opt.value; // textContent 防注入
+      el.appendChild(o);
+    }
+    el.value = value != null ? value : "";
+  } else {
+    el = document.createElement("input");
+    // path/text → text；secret → password（打码）
+    el.type = field.type === "secret" ? "password" : "text";
+    if (field.placeholder) el.placeholder = field.placeholder;
+    el.value = value != null ? value : "";
+  }
+  el.id = fieldId(provId, field.key);
+  el.dataset.key = field.key;
+  return el;
+}
+
+// 收集某 provider 当前所有字段的值 → { key: value }
+function collectProviderValues(meta) {
+  const out = {};
+  for (const f of meta.configSchema || []) {
+    const el = $(fieldId(meta.id, f.key));
+    if (el) out[f.key] = (el.value || "").trim();
+  }
+  return out;
 }
 
 function buildProviderRow(meta, config) {
@@ -72,41 +110,54 @@ function buildProviderRow(meta, config) {
   head.appendChild(span("name", label));
   box.appendChild(head);
 
-  // 主体：路径框 + 检测按钮
+  // 主体：按 configSchema 逐字段渲染「标签 + 控件」
   const body = document.createElement("div");
   body.className = "prov-body";
-  const inp = document.createElement("input");
-  inp.type = "text";
-  inp.id = `prov-dir-${id}`;
-  inp.placeholder = "留空自动检测";
-  inp.value = cfg.configDir || "";
-  const btn = document.createElement("button");
-  btn.className = "probe";
-  btn.type = "button";
-  btn.textContent = "检测";
-  body.appendChild(inp);
-  body.appendChild(btn);
+  for (const field of meta.configSchema || []) {
+    const fieldRow = document.createElement("div");
+    fieldRow.className = "prov-field";
+    if (field.label) fieldRow.appendChild(span("flabel", field.label));
+    fieldRow.appendChild(buildField(id, field, cfg[field.key]));
+    body.appendChild(fieldRow);
+  }
   box.appendChild(body);
 
-  // 检测结果行
-  const result = document.createElement("div");
-  result.className = "probe-result";
-  result.id = `prov-res-${id}`;
-  box.appendChild(result);
+  // 检测：整个 provider 一个按钮（把全字段打包给 probe）。provider 未实现 probe → 不画。
+  if (meta.hasProbe) {
+    const probeRow = document.createElement("div");
+    probeRow.className = "prov-probe";
+    const btn = document.createElement("button");
+    btn.className = "probe";
+    btn.type = "button";
+    btn.textContent = "检测";
+    probeRow.appendChild(btn);
+    box.appendChild(probeRow);
 
-  // 交互：开关切换灰显 + 全关提示；路径变化去抖检测；按钮手动检测
+    const result = document.createElement("div");
+    result.className = "probe-result";
+    result.id = `prov-res-${id}`;
+    box.appendChild(result);
+
+    const doProbe = () => probeProvider(id);
+    btn.addEventListener("click", doProbe);
+    // 字段变化去抖自动检测
+    for (const field of meta.configSchema || []) {
+      const el = $(fieldId(id, field.key));
+      if (!el) continue;
+      const evt = field.type === "select" ? "change" : "input";
+      el.addEventListener(evt, () => {
+        if (probeTimers[id]) clearTimeout(probeTimers[id]);
+        probeTimers[id] = setTimeout(doProbe, 400);
+      });
+    }
+  }
+
+  // 开关切换灰显 + 全关提示
   const refreshDisabled = () => {
     box.classList.toggle("disabled", !chk.checked);
     updateAllOffWarn();
   };
   chk.addEventListener("change", refreshDisabled);
-  const doProbe = () => probeProvider(id);
-  inp.addEventListener("input", () => {
-    if (probeTimers[id]) clearTimeout(probeTimers[id]);
-    probeTimers[id] = setTimeout(doProbe, 400);
-  });
-  btn.addEventListener("click", doProbe);
-
   refreshDisabled();
   return box;
 }
@@ -114,11 +165,13 @@ function buildProviderRow(meta, config) {
 async function probeProvider(id) {
   const el = $(`prov-res-${id}`);
   if (!el) return;
+  const meta = PROVIDERS.find((p) => p.id === id);
+  if (!meta) return;
   el.textContent = "";
   el.appendChild(span("src", "检测中…"));
   try {
-    const dir = $(`prov-dir-${id}`).value.trim();
-    const r = await window.settingsAPI.probe(id, { configDir: dir });
+    const values = collectProviderValues(meta); // 整包字段传给 probe
+    const r = await window.settingsAPI.probe(id, values);
     renderProbe(el, r);
   } catch (e) {
     el.textContent = "";
@@ -166,14 +219,13 @@ $("save").addEventListener("click", () => {
   const colors = {};
   for (const key of COLORS) colors[key] = $(`c-${key}`).value;
 
-  // 收集数据源：勾选的 id → providers；各路径 → providerConfigs
+  // 收集数据源：勾选的 id → providers；各字段 → providerConfigs[id]
   const providers = [];
   const providerConfigs = {};
   for (const p of PROVIDERS) {
     const on = $(`prov-on-${p.id}`);
-    const dir = $(`prov-dir-${p.id}`);
     if (on && on.checked) providers.push(p.id);
-    if (dir) providerConfigs[p.id] = { configDir: dir.value.trim() };
+    providerConfigs[p.id] = collectProviderValues(p); // { [fieldKey]: value }
   }
 
   window.settingsAPI.save({
