@@ -24,7 +24,7 @@ function render(rows) {
   let out = clear;
   const now = new Date().toLocaleTimeString("zh-CN", { hour12: false });
   out += `${C.cyan}${C.bold}╔═══════════════════════════════════════════════════════════╗${C.reset}\n`;
-  out += `${C.cyan}${C.bold}║  Claude Agent Monitor          活跃 agent 实时状态         ║${C.reset}\n`;
+  out += `${C.cyan}${C.bold}║  Agent Monitor                 活跃 agent 实时状态         ║${C.reset}\n`;
   out += `${C.cyan}${C.bold}╚═══════════════════════════════════════════════════════════╝${C.reset}\n`;
 
   const working = rows.filter((r) => r.state === "WORKING").length;
@@ -46,7 +46,12 @@ function render(rows) {
 
     const age = fmtAge(r.ageSec).padStart(4);
     out += `${color}${dot} ${label}${C.reset} ${C.dim}${age}前${C.reset}  ${C.bold}${C.white}${r.title.slice(0, 40)}${C.reset}\n`;
-    const sub = [`${C.gray}${r.sid.slice(0, 8)}${C.reset}`, `${C.dim}${r.project.slice(0, 40)}${C.reset}`];
+    // 行内第二排：[来源] · 会话短 id · 项目 · 活动。来源让多客户端混排时一眼区分。
+    const src = r.providerLabel || r.provider || "";
+    const sub = [];
+    if (src) sub.push(`${C.magenta}[${src}]${C.reset}`);
+    sub.push(`${C.gray}${r.sid.slice(0, 8)}${C.reset}`);
+    sub.push(`${C.dim}${r.project.slice(0, 40)}${C.reset}`);
     if (r.activity) sub.push(`${C.cyan}${r.activity}${C.reset}`);
     out += `            ${sub.join("  ")}\n`;
   }
@@ -56,7 +61,7 @@ function render(rows) {
 }
 
 // ── 主循环 ───────────────────────────────────────────
-console.log("启动中，扫描 Claude 会话...");
+console.log("启动中，扫描 agent 会话...");
 function tick() {
   try { render(scan({ workingSec: WORKING_SEC, recentSec: RECENT_SEC })); }
   catch (e) { process.stdout.write(`${C.red}扫描出错: ${e.message}${C.reset}\n`); }

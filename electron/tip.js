@@ -20,7 +20,11 @@ window.tip.onData((d) => {
   const color = (d.color) || FALLBACK[d.state] || FALLBACK.RECENT;
   $("t-dot").style.setProperty("--c", color);
   $("t-title").textContent = d.title || "(无标题)";
-  $("t-meta").textContent = d.project || "";
+  // meta 行：来源 · 项目（来源让多客户端同屏时一眼区分是谁的任务）
+  const parts = [];
+  if (d.providerLabel) parts.push(d.providerLabel);
+  if (d.project) parts.push(d.project);
+  $("t-meta").textContent = parts.join(" · ");
   const label = STATE_LABEL[d.state] || d.state || "";
   const act = d.activity ? ` · ${d.activity}` : "";
   $("t-act").innerHTML = `<b>${label}</b>${act}　${ago(d.ageSec)}`;

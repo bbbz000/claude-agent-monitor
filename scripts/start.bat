@@ -10,6 +10,6 @@ if errorlevel 1 (
 )
 
 chcp 65001 >nul
-title Claude Agent Monitor
+title Agent Monitor
 node monitor.js
 pause

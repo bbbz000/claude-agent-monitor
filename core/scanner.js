@@ -50,7 +50,8 @@ export function scan({
       const { state, activity } = classify({ ageSec, sig, workingSec });
 
       rows.push({
-        provider: p.id,          // ← 新增：来源标识
+        provider: p.id,          // ← 来源标识（id，用于逻辑/过滤）
+        providerLabel: p.label,  // ← 来源可读名（如 "Claude Code"，供前端直接展示，免查表）
         sid: s.sessionId,
         state,
         ageSec,

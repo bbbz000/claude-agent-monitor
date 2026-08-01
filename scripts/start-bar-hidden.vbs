@@ -20,7 +20,7 @@ here = fso.GetParentFolderName(WScript.ScriptFullName)
 bat = here & "\start-bar.bat"
 
 If Not fso.FileExists(bat) Then
-    MsgBox "start-bar.bat not found: " & bat, vbCritical, "Claude Agent Monitor"
+    MsgBox "start-bar.bat not found: " & bat, vbCritical, "Agent Monitor"
     WScript.Quit 1
 End If
 
@@ -30,5 +30,5 @@ rc = shell.Run("cmd /c """"" & bat & """ --nopause""", 0, True)
 If rc <> 0 Then
     MsgBox "Launch failed (exit code " & rc & ")." & vbCrLf & _
            "Double-click start-bar.bat to see the detailed error.", _
-           vbCritical, "Claude Agent Monitor"
+           vbCritical, "Agent Monitor"
 End If

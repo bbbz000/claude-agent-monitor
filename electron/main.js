@@ -231,6 +231,7 @@ function showTip(index, dotCenterX) {
   tipWin.webContents.send("tip:data", {
     title: row.title, project: row.project, activity: row.activity,
     ageSec: row.ageSec, state: row.state, color,
+    providerLabel: row.providerLabel, // 来源可读名，气泡里显示「Claude Code · 项目」
   });
   // 定位：气泡水平中心对齐圆点，竖直放在小条上方
   const bb = barWin.getBounds();
@@ -330,7 +331,7 @@ function buildMenuTemplate() {
   }));
 
   return [
-    { label: "Claude Agent Monitor", enabled: false },
+    { label: "Agent Monitor", enabled: false },
     { type: "separator" },
     {
       label: "自由拖动",
@@ -366,7 +367,7 @@ function createTray() {
     );
   }
   tray = new Tray(img);
-  tray.setToolTip("Claude Agent Monitor");
+  tray.setToolTip("Agent Monitor");
   tray.setContextMenu(Menu.buildFromTemplate(buildMenuTemplate()));
   // 单击托盘也弹菜单（小条被遮时的兜底）
   tray.on("click", () => tray.popUpContextMenu());
@@ -382,7 +383,7 @@ function openSettings() {
     width: 420,
     height: 700,
     resizable: false,
-    title: "设置 · Claude Agent Monitor",
+    title: "设置 · Agent Monitor",
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(DIR, "preload.cjs"),
