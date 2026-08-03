@@ -6,6 +6,7 @@ import path from "path";
 import { scan } from "../core/scanner.js";
 import { allProviders, listMeta } from "../core/providers/registry.js";
 import { load, save, resolveDisplay } from "./config.js";
+import { LedSerial } from "../hardware/led-serial.js";
 
 const DIR = import.meta.dirname;
 const DEV = process.argv.includes("--dev");
@@ -59,6 +60,7 @@ let tipWin = null;             // 悬停气泡窗（透明置顶，只在 hover 
 let tray = null;
 let scanTimer = null;
 let topTimer = null;           // 置顶守护定时器
+let led = null;                // 外设灯串口管理（LedSerial 实例）；仅 config.hardware.enabled 时创建
 let lastRows = [];             // 最近一次 scan 的完整结果（供 hover 查详情；小条本身仍只收 state）
 let programmaticMove = false; // true 时的 moved 事件由程序触发，非用户拖动，需忽略
 
@@ -278,6 +280,9 @@ function tick() {
     const states = rows.map((r) => r.state);
     if (DIAG) console.log("[bar] tick states=", JSON.stringify(states), "(", states.length, "agents )");
     barWin.webContents.send("agents:update", states);
+    // 外设灯：把完整 rows 编码成帧写串口（未连接则内部异步尝试连接，不阻塞本轮）。
+    // 连接状态变化由 LedSerial 的 onChange 回调驱动 rebuildMenus（跳变发生在 tick 之间，轮询会漏）。
+    if (led) led.push(rows);
     // 圆点单位数变化 → 重算窗口宽度并重定位（右边缘固定）
     const units = dotUnits(states);
     if (units !== lastUnits) {
@@ -298,6 +303,33 @@ function startScanLoop() {
   topTimer = setInterval(keepOnTop, 600);
 }
 
+// ── 外设灯（ESP32-C6 RGB LED）生命周期 ──────────────────
+// 按 config.hardware 建/更新/关闭 LedSerial。启用=懒连接（插上即连、拔了自愈）；
+// 禁用=发全灭帧后关口。serialport 缺库时 LedSerial 内部静默降级，不影响小条。
+function syncLed() {
+  const hw = config.hardware || {};
+  if (hw.enabled) {
+    if (!led) {
+      led = new LedSerial({
+        autoPort: hw.autoPort !== false,
+        port: hw.port || "",
+        ledCount: hw.ledCount || 4,
+        log: (m) => { if (DIAG) console.log("[led]", m); },
+        onChange: () => rebuildMenus(), // 连上/断开时刷新托盘状态行（跳变在 tick 之间，靠回调捕捉）
+      });
+    } else {
+      // 配置变了（口/数量/自动识别）→ 更新参数，下一轮 push 生效
+      led.autoPort = hw.autoPort !== false;
+      led.port = hw.port || "";
+      led.ledCount = hw.ledCount || 4;
+    }
+  } else if (led) {
+    const dying = led;
+    led = null;
+    dying.close(); // 发全灭帧再关口（异步，不等）
+  }
+}
+
 function pushConfig() {
   if (barWin && !barWin.isDestroyed()) {
     // opaque：纯不透明窗（四角需铺满、不留圆角露底）；透明窗则 false
@@ -312,6 +344,7 @@ function applyConfig(next, { reposition = true, restartLoop = false } = {}) {
   save(app.getPath("userData"), config);
   if (reposition) positionBar();
   if (restartLoop) startScanLoop();
+  syncLed();   // 外设灯：按新 config.hardware 建/更新/关
   pushConfig();
   rebuildMenus();
 }
@@ -347,6 +380,38 @@ function buildMenuTemplate() {
       },
     },
     { label: "活跃阈值", submenu: thresholdItems },
+    { type: "separator" },
+    {
+      label: "外设灯（ESP32）",
+      submenu: [
+        {
+          label: "启用",
+          type: "checkbox",
+          checked: !!(config.hardware && config.hardware.enabled),
+          click: (item) => applyConfig(
+            { ...config, hardware: { ...config.hardware, enabled: item.checked } },
+            { reposition: false }
+          ),
+        },
+        {
+          label: "自动识别串口",
+          type: "checkbox",
+          checked: !(config.hardware && config.hardware.autoPort === false),
+          click: (item) => applyConfig(
+            { ...config, hardware: { ...config.hardware, autoPort: item.checked } },
+            { reposition: false }
+          ),
+        },
+        { type: "separator" },
+        // 只读状态行：启用后显示连接情况（未连接/已连接 COMx/缺库）；未启用时提示先勾启用
+        {
+          label: (config.hardware && config.hardware.enabled)
+            ? (led ? led.status() : "未连接（等待设备）")
+            : "未启用",
+          enabled: false,
+        },
+      ],
+    },
     { type: "separator" },
     { label: "设置…", click: openSettings },
     { type: "separator" },
@@ -476,6 +541,7 @@ app.whenReady().then(() => {
   config = load(app.getPath("userData"));
   createBar();
   createTip();
+  syncLed();          // 先按 config.hardware 建好 led，再建托盘菜单，避免状态行定格“未启用”
   createTray();
   wireScreenEvents();
   startScanLoop();
@@ -489,4 +555,5 @@ app.on("window-all-closed", (e) => {
 app.on("before-quit", () => {
   if (scanTimer) clearInterval(scanTimer);
   if (topTimer) clearInterval(topTimer);
+  if (led) { led.close(); led = null; } // 退出前把灯全灭并关串口
 });

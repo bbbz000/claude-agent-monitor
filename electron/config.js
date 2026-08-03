@@ -27,6 +27,12 @@ export function getDefaults() {
     recentSec: 300,
     barBackground: "rgba(0,0,0,0.35)", // 胶囊背景；设为 "transparent" 可关闭
     refreshMs: 2000,
+    hardware: {                        // 外设灯（ESP32-C6 RGB LED）；默认关，不影响纯软件用户
+      enabled: false,                  //   总开关
+      autoPort: true,                  //   true=按 USB VID(303a) 自动挑串口；false=用下面 port
+      port: "",                        //   autoPort=false 时的固定串口（如 COM3）
+      ledCount: 4,                     //   LED 数量
+    },
   };
 }
 
@@ -47,6 +53,7 @@ function mergeDefaults(saved) {
     ...saved,
     colors: { ...d.colors, ...(saved.colors || {}) },
     offset: { ...d.offset, ...(saved.offset || {}) },
+    hardware: { ...d.hardware, ...(saved.hardware || {}) },
     providerConfigs: mergedProviderConfigs,
   };
   // 迁移：旧版把 Claude 目录存在顶层 configDir。若新版字段缺失，则搬进 providerConfigs.claude。

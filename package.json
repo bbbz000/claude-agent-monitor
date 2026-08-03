@@ -30,12 +30,12 @@
     "bar:diag": "electron . --diag --dev",
     "dist": "electron-builder --win portable"
   },
+  "dependencies": {
+    "serialport": "^12.0.0"
+  },
   "devDependencies": {
     "electron": "^33.0.0",
     "electron-builder": "^26.15.3"
-  },
-  "optionalDependencies": {
-    "serialport": "^12.0.0"
   },
   "build": {
     "appId": "com.claude.agent-monitor",
@@ -47,8 +47,15 @@
     "files": [
       "electron/**/*",
       "core/**/*",
+      "hardware/led-frame.js",
+      "hardware/led-serial.js",
       "package.json"
     ],
+    "asarUnpack": [
+      "**/node_modules/serialport/**",
+      "**/node_modules/@serialport/**"
+    ],
+    "npmRebuild": true,
     "win": {
       "target": "portable",
       "icon": "build/icon.png"

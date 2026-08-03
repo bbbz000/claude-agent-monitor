@@ -13,6 +13,7 @@
 // serialport 依赖仅在真正开串口时才 require（--dry-run / --list 无 serialport 也能跑）。
 
 import { scan } from "../../core/scanner.js";
+import { buildFrame, offFrame, LED_COUNT } from "../led-frame.js";
 
 // ── 参数解析 ─────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -27,27 +28,8 @@ const LIST = flag("--list");
 const PORT = opt("--port", null);
 const BAUD = parseInt(opt("--baud", "115200"), 10);
 const INTERVAL = parseInt(opt("--interval", "2000"), 10);
-const LED_COUNT = 4; // 4 颗独立 RGB LED（物理上限）
 
-// ── 状态 → RGB 映射（唯一真相源见 hardware/PROTOCOL.md）──
-const STATE_RGB = {
-  WORKING: [0, 200, 0],     // 绿
-  WAITING: [255, 80, 0],    // 橙
-  DONE:    [0, 120, 200],   // 青
-  RECENT:  [200, 160, 0],   // 黄
-};
-const EMPTY = [0, 0, 0];    // 灭（空槽 / 未知状态）
-
-// ── 把 scan() 结果编码成一帧（见 PROTOCOL.md）──
-// rows 已按 ageSec 升序（最活跃在前，见 core/scanner.js）。取前 4，不足补 EMPTY。
-function buildFrame(rows) {
-  const slots = [];
-  for (let i = 0; i < LED_COUNT; i++) {
-    const st = rows[i] && rows[i].state;
-    slots.push(STATE_RGB[st] || EMPTY);
-  }
-  return slots.map(([r, g, b]) => `${r},${g},${b}`).join(";") + "\n";
-}
+// 状态→RGB 映射、帧编码、LED 数量统一来自 ../led-frame.js（与 Electron 主进程共用）。
 
 // 供人眼看的一行摘要（--dry-run 时附在帧后，方便对照）
 function summarize(rows) {
@@ -122,7 +104,7 @@ async function main() {
   process.on("SIGINT", () => {
     clearInterval(timer);
     // 退出前把灯全灭，避免定格
-    try { if (sp.writable) sp.write(`0,0,0;0,0,0;0,0,0;0,0,0\n`); } catch {}
+    try { if (sp.writable) sp.write(offFrame()); } catch {}
     setTimeout(() => { sp.close(() => process.exit(0)); }, 100);
   });
 }
