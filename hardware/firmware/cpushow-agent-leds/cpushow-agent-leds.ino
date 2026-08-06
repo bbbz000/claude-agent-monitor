@@ -55,11 +55,22 @@ const int METER_PINS[NUM_SLOTS] = { 26, 25 };   // 左表 DAC2, 右表 DAC1
 // 指针物理行程对应的 DAC 8bit 值域（沿用原 CPU_SHOW 固件的 10..170）。
 const int METER_MIN = 10;     // 指针静止端
 const int METER_MAX = 170;    // 指针满偏端
-// 指针平滑：每帧(~16ms)朝目标挪的最大步长，避免跳变（原固件 loopTask2 的渐进手感）。
-const int METER_STEP = 3;
+// 指针平滑：指数缓动。PC 端每 2 秒才发一个新目标（--interval 2000），若用“每帧挪固定步长”
+// 会几十毫秒 snap 到位、再干等 2 秒，肉眼是“挪一下→停→挪一下”的顿挫。改为每帧朝目标挪掉
+// 【剩余距离的一个比例】METER_EASE：指针始终缓缓滑动、从不急停，跨越 2 秒间隔也顺。
+// 系数越小越缓（越接近匀速慢滑），越大越跟手。0.08 约 0.5~0.6s 贴近目标，观感顺滑。
+const float METER_EASE = 0.02f;
 // 各表是否反装：true = 活跃时指针走向 MIN 端而非 MAX 端。
 // 默认按原 CPU_SHOW 固件：左表反装、右表正装。自检时若某表方向反了，翻这里对应项即可。
 const bool METER_REVERSE[NUM_SLOTS] = { true, false };
+
+// ── 表头“休息”（护表机芯）──────────────────────────────
+// 反装的表（如左表）在【空闲】时指针反而被 DAC 顶在满偏端持续受力——恰恰大部分时间都这样。
+// 为护机芯：两表活跃度持续为 0 满 REST_AFTER_MS（≈下班/夜里没活动）→ 进“休息”：
+//   把 DAC 直接写 0（0V，指针完全松开、回自然位、不再被电压顶着），并停止刷新。
+//   一有任何活跃度 >0（白天来活了）→ 立即唤醒，renderMeters 恢复平滑回到目标。
+// 门槛取 1 小时：白天偶尔空几分钟不算，只有真·长时间无活动才卸力。
+const unsigned long REST_AFTER_MS = 60UL * 60UL * 1000UL;
 
 // 看门狗：3 分钟没收到任何帧就全灭
 const unsigned long WATCHDOG_MS = 3UL * 60UL * 1000UL;
@@ -73,9 +84,14 @@ String buf = "";
 int   cur[NUM_SLOTS][3];              // 各槽目标 RGB（未经动效缩放）
 Effect eff[NUM_SLOTS];               // 各槽当前动效
 int   curAct[NUM_SLOTS];             // 各槽目标活跃度 0..255（来自帧尾 | 段）
-int   dacCur[NUM_SLOTS];             // 各表当前 DAC 输出值（平滑逼近用，非目标）
+float dacCur[NUM_SLOTS];            // 各表当前 DAC 输出值（缓动逼近用，float 存亚整数增量）
 unsigned long lastFrameMs = 0;
 bool everReceived = false;
+
+// 表头休息状态：idleSinceMs = 两表活跃度都变 0 的起始时刻（0=当前非全空闲）；
+// metersResting = 是否已进入休息（DAC 已写 0、停止刷新）。
+unsigned long idleSinceMs = 0;
+bool metersResting = false;
 
 // 活跃度(0..255) → 该表的目标 DAC 值(METER_MIN..METER_MAX)，含反装处理。
 int meterTargetFor(int i) {
@@ -182,13 +198,32 @@ void renderSlot(int i, unsigned long now) {
   writeChannel(i, 2, cur[i][2], scale);
 }
 
-// 平滑驱动所有指针表头：dacCur[] 每帧朝各自目标挪最多 METER_STEP，再写 DAC。非阻塞。
+// 维护表头休息状态：两表活跃度都为 0 持续满 REST_AFTER_MS → 进休息（DAC 写 0，指针松开）；
+// 一旦任一活跃度 >0 → 立即唤醒。每帧调用一次（在 renderMeters 之前）。
+void updateMeterRest(unsigned long now) {
+  bool allIdle = true;
+  for (int i = 0; i < NUM_SLOTS; i++) if (curAct[i] > 0) { allIdle = false; break; }
+
+  if (!allIdle) {                 // 有活儿：清空闲计时、退出休息
+    idleSinceMs = 0;
+    metersResting = false;
+    return;
+  }
+  if (idleSinceMs == 0) idleSinceMs = now;                 // 刚进入全空闲，起表
+  if (!metersResting && (now - idleSinceMs >= REST_AFTER_MS)) {
+    metersResting = true;         // 空闲够久 → 卸力：两表 DAC 直接归零，指针完全松开
+    for (int i = 0; i < NUM_SLOTS; i++) { dacCur[i] = 0; dacWrite(METER_PINS[i], 0); }
+  }
+}
+
+// 缓动驱动所有指针表头：dacCur[] 每帧朝目标挪掉剩余距离的 METER_EASE 比例，再写 DAC。非阻塞。
+// 休息中直接返回：指针已卸力停在 0V，不再刷新（updateMeterRest 会在来活时解除）。
 void renderMeters() {
+  if (metersResting) return;
   for (int i = 0; i < NUM_SLOTS; i++) {
-    int target = meterTargetFor(i);
-    if (dacCur[i] < target)      dacCur[i] = min(target, dacCur[i] + METER_STEP);
-    else if (dacCur[i] > target) dacCur[i] = max(target, dacCur[i] - METER_STEP);
-    dacWrite(METER_PINS[i], dacCur[i]);
+    float target = meterTargetFor(i);
+    dacCur[i] += (target - dacCur[i]) * METER_EASE;   // 缓动：每帧挪掉剩余距离的一小比例
+    dacWrite(METER_PINS[i], (int)(dacCur[i] + 0.5f)); // 四舍五入写 DAC（8bit 整数）
   }
 }
 
@@ -283,6 +318,7 @@ void loop() {
 
   unsigned long now = millis();
   for (int i = 0; i < NUM_SLOTS; i++) renderSlot(i, now);
+  updateMeterRest(now);   // 先判休息（长时间全空闲→卸力护表），再驱动指针
   renderMeters();
   delay(16);  // ~60fps
 }
