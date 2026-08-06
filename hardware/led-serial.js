@@ -9,8 +9,12 @@
 
 import { buildFrame, offFrame } from "./led-frame.js";
 
-// ESP32-C6（及多数新 ESP 芯片）的 USB 厂商 ID。serialport 返回的 vendorId 是小写十六进制无前缀。
-const ESP_VENDOR_ID = "303a";
+// 认得的 USB 转串口 / USB 厂商 ID（serialport 返回的 vendorId 是小写十六进制无前缀）：
+//   303a = Espressif 原生 USB（ESP32-C6/C3/S3 内置 USB-Serial/JTAG）
+//   1a86 = 沁恒 WCH（CH340 / CH9102 等外置 USB 串口，CPU_SHOW 那块初代 ESP32 用的就是它）
+//   10c4 = Silicon Labs（CP2102/CP2104，另一种常见外置 USB 串口）
+// 只要命中其一就认为是我们的灯板。多设备时取第一个命中的。
+const ESP_VENDOR_IDS = ["303a", "1a86", "10c4"];
 
 // 动态加载 serialport；缺库返回 null（不抛，让上层静默降级）。
 async function loadSerialPort() {
@@ -56,12 +60,12 @@ export class LedSerial {
     return "未连接（等待设备）";
   }
 
-  // 自动识别：列出串口，挑第一个 VID=303a 的（ESP32-C6）。返回路径或 null。
+  // 自动识别：列出串口，挑第一个 VID 命中白名单（303a/1a86/10c4）的。返回路径或 null。
   async detectPort() {
     if (!this.SerialPort) return null;
     let ports;
     try { ports = await this.SerialPort.list(); } catch { return null; }
-    const hit = ports.find((p) => (p.vendorId || "").toLowerCase() === ESP_VENDOR_ID);
+    const hit = ports.find((p) => ESP_VENDOR_IDS.includes((p.vendorId || "").toLowerCase()));
     return hit ? hit.path : null;
   }
 
