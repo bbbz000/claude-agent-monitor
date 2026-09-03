@@ -9,7 +9,7 @@
 // 协议真相源见 ../../SCREEN_PROTOCOL.md。
 //
 // 依赖库（Arduino IDE 库管理器安装）：
-//   - U8g2（单色图形，含 wqy12 中文字体）
+//   - U8g2（单色图形，含 wqy16 中文字体）
 //   - ArduinoJson（v6/v7 皆可）
 // SHTC3/ADC 用板载 ESP-IDF 驱动（Arduino-ESP32 core 自带），已随本目录附带 BSP 文件。
 //
@@ -150,27 +150,27 @@ static void drawRightStr(int xRight, int y, const char *s) {
 
 // 画一个 0..100 的百分比条（label 在左，条在右）
 static void drawBar(int x, int y, int w, int h, int pct, const char *label) {
-  u8g2->setFont(u8g2_font_6x12_tf);
-  u8g2->drawStr(x, y + h - 2, label);
-  int labelW = 40;                       // 给 "CPU"/"MEM" + 空格留固定宽
+  u8g2->setFont(u8g2_font_8x13_tf);      // 放大：标签/百分比用 8x13
+  u8g2->drawStr(x, y + h - 3, label);
+  int labelW = 40;                       // "CPU"/"MEM"（8x13 约 24px）+ 间隔
   int bx = x + labelW;
-  int bw = w - labelW - 34;              // 右侧留 34px 显 "100%"
+  int bw = w - labelW - 46;              // 右侧留 46px 显 "100%"（8x13）
   if (bw < 10) bw = 10;
   u8g2->drawFrame(bx, y, bw, h);
   int fill = (bw - 2) * (pct < 0 ? 0 : pct > 100 ? 100 : pct) / 100;
   if (fill > 0) u8g2->drawBox(bx + 1, y + 1, fill, h - 2);
   char pctStr[8];
   snprintf(pctStr, sizeof(pctStr), "%d%%", pct);
-  u8g2->drawStr(bx + bw + 4, y + h - 2, pctStr);
+  u8g2->drawStr(bx + bw + 5, y + h - 3, pctStr);
 }
 
 // 状态图标：用简单几何形区分（单色屏无颜色）
 //   WORKING ●(实心) / WAITING ▶(三角，闪) / DONE ○(空心) / RECENT ·(小点)
 static void drawStateIcon(int cx, int cy, const char *st) {
-  if (!strcmp(st, "WORKING"))      u8g2->drawDisc(cx, cy, 4);
-  else if (!strcmp(st, "WAITING")) u8g2->drawTriangle(cx - 4, cy - 4, cx - 4, cy + 4, cx + 4, cy);
-  else if (!strcmp(st, "DONE"))    u8g2->drawCircle(cx, cy, 4);
-  else                              u8g2->drawDisc(cx, cy, 2); // RECENT / 其它
+  if (!strcmp(st, "WORKING"))      u8g2->drawDisc(cx, cy, 6);
+  else if (!strcmp(st, "WAITING")) u8g2->drawTriangle(cx - 6, cy - 6, cx - 6, cy + 6, cx + 6, cy);
+  else if (!strcmp(st, "DONE"))    u8g2->drawCircle(cx, cy, 6);
+  else                              u8g2->drawDisc(cx, cy, 3); // RECENT / 其它
 }
 
 // ── 渲染整屏 ────────────────────────────────────────────
@@ -180,45 +180,45 @@ static void render() {
 
   // 未收到任何帧：提示等待
   if (!g_gotFrame || g_off) {
-    u8g2->setFont(u8g2_font_wqy12_t_gb2312);
+    u8g2->setFont(u8g2_font_wqy16_t_gb2312);
     const char *msg = g_off ? "已断开" : "等待 PC 连接…";
     int w = u8g2->getUTF8Width(msg);
     u8g2->drawUTF8((LCD_W - w) / 2, LCD_H / 2, msg);
     // 即便没帧也显示本地温湿度/电池，证明板子活着
     char line[48];
     snprintf(line, sizeof(line), "%.1fC  %.0f%%RH  BAT %d%%", g_temp, g_humi, g_batt);
-    u8g2->setFont(u8g2_font_6x12_tf);
+    u8g2->setFont(u8g2_font_8x13_tf);
     int lw = u8g2->getStrWidth(line);
-    u8g2->drawStr((LCD_W - lw) / 2, LCD_H / 2 + 20, line);
+    u8g2->drawStr((LCD_W - lw) / 2, LCD_H / 2 + 26, line);
     u8g2->sendBuffer();
     return;
   }
 
-  // ── 顶栏 y=0..16 ──
-  // 左：时钟
-  u8g2->setFont(u8g2_font_7x14B_tf);
-  u8g2->drawStr(2, 14, g_clock[0] ? g_clock : "--:--");
+  // ── 顶栏 y=0..24 ──
+  // 左：时钟（放大到 10x20）
+  u8g2->setFont(u8g2_font_10x20_tf);
+  u8g2->drawStr(2, 19, g_clock[0] ? g_clock : "--:--");
   // 中：温湿度
   char th[32];
   if (g_thValid) snprintf(th, sizeof(th), "%.1fC %.0f%%", g_temp, g_humi);
   else           snprintf(th, sizeof(th), "--C --%%");
-  u8g2->setFont(u8g2_font_6x12_tf);
+  u8g2->setFont(u8g2_font_8x13_tf);
   int thw = u8g2->getStrWidth(th);
-  u8g2->drawStr((LCD_W - thw) / 2, 13, th);
+  u8g2->drawStr((LCD_W - thw) / 2, 18, th);
   // 右：电池
   char bat[16];
   snprintf(bat, sizeof(bat), "BAT %d%%", g_batt);
-  drawRightStr(LCD_W - 2, 13, bat);
-  u8g2->drawHLine(0, 17, LCD_W);
+  drawRightStr(LCD_W - 2, 18, bat);
+  u8g2->drawHLine(0, 25, LCD_W);
 
-  // ── 指标带 y=20..60（约屏高 1/5）──
-  drawBar(2, 22, LCD_W - 4, 14, g_cpu, "CPU");
-  drawBar(2, 40, LCD_W - 4, 14, g_mem, "MEM");
-  u8g2->drawHLine(0, 58, LCD_W);
+  // ── 指标带 y=28..76（放大条高 18）──
+  drawBar(2, 30, LCD_W - 4, 18, g_cpu, "CPU");
+  drawBar(2, 54, LCD_W - 4, 18, g_mem, "MEM");
+  u8g2->drawHLine(0, 78, LCD_W);
 
-  // ── 会话列表 y=62..300 ──
-  int y = 62;
-  const int ROW_H = 30;   // 每条约 2 行 + 间距
+  // ── 会话列表 y=82..300（字大优先，每条 ~48px，约显 4 条）──
+  int y = 82;
+  const int ROW_H = 48;   // 每条：标题行(16px) + meta 行(16px) + 间距
   bool blinkOn = (millis() / 500) % 2 == 0; // WAITING 边框闪烁节拍
   for (int i = 0; i < g_sessCount; i++) {
     if (y + ROW_H > LCD_H) break; // 放不下就停
@@ -227,18 +227,18 @@ static void render() {
 
     // WAITING 边框闪烁：亮的半拍画框
     if (s.waiting && blinkOn) {
-      u8g2->drawFrame(0, top - 1, LCD_W, ROW_H - 2);
+      u8g2->drawFrame(0, top - 2, LCD_W, ROW_H - 2);
     }
 
-    // 行1：状态图标 + 标题
-    drawStateIcon(10, top + 8, s.st);
-    u8g2->setFont(u8g2_font_wqy12_t_gb2312);
-    u8g2->drawUTF8(20, top + 12, s.ti);
+    // 行1：状态图标 + 标题（wqy16 中文）
+    drawStateIcon(12, top + 11, s.st);
+    u8g2->setFont(u8g2_font_wqy16_t_gb2312);
+    u8g2->drawUTF8(26, top + 16, s.ti);
 
-    // 行2：项目 · 来源 · age（灰信息，用小字体）
+    // 行2：项目 · 来源 · age（同样 wqy16，字大优先）
     char meta[160];
     snprintf(meta, sizeof(meta), "%s · %s · %ds", s.pj, s.pv, s.age);
-    u8g2->drawUTF8(20, top + 26, meta);
+    u8g2->drawUTF8(26, top + 38, meta);
 
     y += ROW_H;
   }
@@ -247,15 +247,15 @@ static void render() {
   if (g_total > g_sessCount) {
     char more[24];
     snprintf(more, sizeof(more), "+%d 更多", g_total - g_sessCount);
-    u8g2->setFont(u8g2_font_wqy12_t_gb2312);
-    drawRightStr(LCD_W - 2, LCD_H - 2, more);
+    u8g2->setFont(u8g2_font_wqy16_t_gb2312);
+    drawRightStr(LCD_W - 2, LCD_H - 3, more);
   }
 
   // 【诊断】左下角显示 收到行数/解析帧数（L=行 F=帧）。冻住时看这俩涨不涨：
   //   都不涨 → PC 停发帧（scan 卡死）；L 涨 F 不涨 → 帧到了但解析失败。稳定后可删。
   char dbg[32];
   snprintf(dbg, sizeof(dbg), "L%lu F%lu", (unsigned long)g_rxLines, (unsigned long)g_rxFrames);
-  u8g2->setFont(u8g2_font_5x7_tf);
+  u8g2->setFont(u8g2_font_6x10_tf);
   u8g2->drawStr(2, LCD_H - 2, dbg);
 
   u8g2->sendBuffer();
