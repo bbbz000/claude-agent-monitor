@@ -73,8 +73,6 @@ static uint32_t g_lastSensorMs = 0;
 static uint32_t g_lastRenderMs = 0;  // 渲染节流时间戳（用 millis 节流，不用 delay 阻塞串口）
 static uint32_t g_lastFrameMs = 0;   // 最近一次收到「数据帧」的时刻。用于推断 USB 在线=充电中：
                                      // 帧在持续到达 ⇒ 屏幕 USB 接着 PC ⇒ VBUS 供电 ⇒ 电池在充。
-static uint32_t g_rxLines = 0;       // 【诊断】收到的行数（每个非空 \n 计一次）
-static uint32_t g_rxFrames = 0;      // 【诊断】成功解析的帧数（JSON 解析通过，含 off 帧）
 
 // 是否至少收到过一帧（没收到就显示等待提示）
 static bool   g_gotFrame = false;
@@ -100,7 +98,6 @@ static void parseFrame(const char *json, size_t len) {
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, json, len);
   if (err) return; // 畸形帧整帧丢弃，保持上一帧（与 LED 协议容错一致）
-  g_rxFrames++;    // 【诊断】解析成功
 
   if (doc["off"].as<bool>()) { g_off = true; g_gotFrame = true; return; }
   g_off = false;
@@ -138,7 +135,7 @@ static void pumpSerial() {
     char c = (char)Serial.read();
     if (c == '\n') {
       lineBuf[lineLen] = 0;
-      if (lineLen > 0) { g_rxLines++; parseFrame(lineBuf, lineLen); } // 【诊断】收到一整行
+      if (lineLen > 0) parseFrame(lineBuf, lineLen);
       lineLen = 0;
     } else if (c != '\r') {
       if (lineLen < FRAME_LINE_MAX - 1) lineBuf[lineLen++] = c;
@@ -334,13 +331,6 @@ static void render() {
     u8g2->setFont(u8g2_font_wqy16_t_gb2312);
     drawRightStr(LCD_W - 2, LCD_H - 3, more);
   }
-
-  // 【诊断】左下角显示 收到行数/解析帧数（L=行 F=帧）。冻住时看这俩涨不涨：
-  //   都不涨 → PC 停发帧（scan 卡死）；L 涨 F 不涨 → 帧到了但解析失败。稳定后可删。
-  char dbg[32];
-  snprintf(dbg, sizeof(dbg), "L%lu F%lu", (unsigned long)g_rxLines, (unsigned long)g_rxFrames);
-  u8g2->setFont(u8g2_font_6x10_tf);
-  u8g2->drawStr(2, LCD_H - 2, dbg);
 
   u8g2->sendBuffer();
 }
