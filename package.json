@@ -49,6 +49,8 @@
       "core/**/*",
       "hardware/led-frame.js",
       "hardware/led-serial.js",
+      "hardware/screen-frame.js",
+      "hardware/screen-serial.js",
       "package.json"
     ],
     "asarUnpack": [

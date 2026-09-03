@@ -33,6 +33,12 @@ export function getDefaults() {
       port: "",                        //   autoPort=false 时的固定串口（如 COM3）
       ledCount: 4,                     //   LED 数量
     },
+    screen: {                          // 屏幕板（ESP32-S3-RLCD-4.2 反射式 LCD）；默认关，独立于外设灯
+      enabled: false,                  //   总开关
+      autoPort: true,                  //   true=按 USB VID(303a) 自动挑串口；两块板同插时请关掉并指定 port
+      port: "",                        //   autoPort=false 时的固定串口（如 COM7）
+      maxSessions: 6,                  //   屏幕最多显示几条会话
+    },
   };
 }
 
@@ -54,6 +60,7 @@ function mergeDefaults(saved) {
     colors: { ...d.colors, ...(saved.colors || {}) },
     offset: { ...d.offset, ...(saved.offset || {}) },
     hardware: { ...d.hardware, ...(saved.hardware || {}) },
+    screen: { ...d.screen, ...(saved.screen || {}) },
     providerConfigs: mergedProviderConfigs,
   };
   // 迁移：旧版把 Claude 目录存在顶层 configDir。若新版字段缺失，则搬进 providerConfigs.claude。

@@ -7,6 +7,8 @@ import { scan } from "../core/scanner.js";
 import { allProviders, listMeta } from "../core/providers/registry.js";
 import { load, save, resolveDisplay } from "./config.js";
 import { LedSerial } from "../hardware/led-serial.js";
+import { ScreenSerial } from "../hardware/screen-serial.js";
+import os from "os";
 
 const DIR = import.meta.dirname;
 const DEV = process.argv.includes("--dev");
@@ -61,6 +63,10 @@ let tray = null;
 let scanTimer = null;
 let topTimer = null;           // 置顶守护定时器
 let led = null;                // 外设灯串口管理（LedSerial 实例）；仅 config.hardware.enabled 时创建
+let screenDev = null;          // 屏幕板串口管理（ScreenSerial 实例）；仅 config.screen.enabled 时创建（不叫 screen，避免撞 electron 的 screen）
+let metricsTimer = null;       // CPU/内存采样定时器（独立于 tick，1s 一次）
+let lastCpu = null;            // 上次 os.cpus() 累计时间快照，用于算 CPU% 增量
+let lastMetrics = { cpu: 0, mem: 0 }; // 最近一次系统指标（供屏幕帧携带）
 let lastRows = [];             // 最近一次 scan 的完整结果（供 hover 查详情；小条本身仍只收 state）
 let programmaticMove = false; // true 时的 moved 事件由程序触发，非用户拖动，需忽略
 
@@ -266,6 +272,46 @@ function keepOnTop() {
   } catch {}
 }
 
+// ── 系统指标采样（供屏幕板显示）─────────────────────────
+// 用 Node 内置 os，不引依赖。CPU% 靠两次 os.cpus() 累计时间的增量算（os.loadavg 在 Windows 上恒 0，不可用）。
+function hhmm() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// 汇总所有核心的 times，返回 { idle, total }。
+function cpuTimesSum() {
+  const cpus = os.cpus() || [];
+  let idle = 0, total = 0;
+  for (const c of cpus) {
+    const t = c.times;
+    idle += t.idle;
+    total += t.user + t.nice + t.sys + t.idle + t.irq;
+  }
+  return { idle, total };
+}
+
+// 采一次 CPU/内存 → 写 lastMetrics。首次调用只建立 CPU 基线（返回上轮值，避免 0/异常）。
+function sampleMetrics() {
+  // 内存%：已用 / 总
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+  const mem = totalMem > 0 ? Math.round(((totalMem - freeMem) / totalMem) * 100) : 0;
+
+  // CPU%：本次与上次快照的增量
+  const cur = cpuTimesSum();
+  let cpu = lastMetrics.cpu;
+  if (lastCpu) {
+    const dIdle = cur.idle - lastCpu.idle;
+    const dTotal = cur.total - lastCpu.total;
+    cpu = dTotal > 0 ? Math.round((1 - dIdle / dTotal) * 100) : 0;
+    if (cpu < 0) cpu = 0; else if (cpu > 100) cpu = 100;
+  }
+  lastCpu = cur;
+  lastMetrics = { cpu, mem };
+}
+
 // ── 扫描 → 只推 state 数组（隐私/性能：不传标题/路径）────
 function tick() {
   if (!barWin || barWin.isDestroyed()) return;
@@ -283,6 +329,8 @@ function tick() {
     // 外设灯：把完整 rows 编码成帧写串口（未连接则内部异步尝试连接，不阻塞本轮）。
     // 连接状态变化由 LedSerial 的 onChange 回调驱动 rebuildMenus（跳变发生在 tick 之间，轮询会漏）。
     if (led) led.push(rows);
+    // 屏幕板：把完整 rows + 最近系统指标 + 当前时钟编码成 JSON 帧写串口（同样懒连接/不阻塞）。
+    if (screenDev) screenDev.push(rows, { cpu: lastMetrics.cpu, mem: lastMetrics.mem, t: hhmm() });
     // 圆点单位数变化 → 重算窗口宽度并重定位（右边缘固定）
     const units = dotUnits(states);
     if (units !== lastUnits) {
@@ -301,6 +349,11 @@ function startScanLoop() {
   // 让被任务栏盖住后能在 ~600ms 内恢复，而不必把扫描频率也提高。
   if (topTimer) clearInterval(topTimer);
   topTimer = setInterval(keepOnTop, 600);
+  // 系统指标独立采样：CPU% 需要相邻两次 os.cpus() 增量，固定 1s 一次比 refreshMs 更稳（且与之解耦）。
+  // 纯内存操作，不阻塞。先采一次建立 CPU 基线。
+  if (metricsTimer) clearInterval(metricsTimer);
+  sampleMetrics();
+  metricsTimer = setInterval(sampleMetrics, 1000);
 }
 
 // ── 外设灯（ESP32-C6 RGB LED）生命周期 ──────────────────
@@ -330,6 +383,31 @@ function syncLed() {
   }
 }
 
+// ── 屏幕板（ESP32-S3-RLCD-4.2）生命周期 ─────────────────
+// 与 syncLed 同构：按 config.screen 建/更新/关闭 ScreenSerial。启用=懒连接；禁用=发全清帧后关口。
+function syncScreen() {
+  const sc = config.screen || {};
+  if (sc.enabled) {
+    if (!screenDev) {
+      screenDev = new ScreenSerial({
+        autoPort: sc.autoPort !== false,
+        port: sc.port || "",
+        maxSessions: sc.maxSessions || 6,
+        log: (m) => { if (DIAG) console.log("[screen]", m); },
+        onChange: () => rebuildMenus(), // 连上/断开时刷新托盘状态行
+      });
+    } else {
+      screenDev.autoPort = sc.autoPort !== false;
+      screenDev.port = sc.port || "";
+      screenDev.maxSessions = sc.maxSessions || 6;
+    }
+  } else if (screenDev) {
+    const dying = screenDev;
+    screenDev = null;
+    dying.close(); // 发全清帧再关口（异步，不等）
+  }
+}
+
 function pushConfig() {
   if (barWin && !barWin.isDestroyed()) {
     // opaque：纯不透明窗（四角需铺满、不留圆角露底）；透明窗则 false
@@ -345,6 +423,7 @@ function applyConfig(next, { reposition = true, restartLoop = false } = {}) {
   if (reposition) positionBar();
   if (restartLoop) startScanLoop();
   syncLed();   // 外设灯：按新 config.hardware 建/更新/关
+  syncScreen();// 屏幕板：按新 config.screen 建/更新/关
   pushConfig();
   rebuildMenus();
 }
@@ -407,6 +486,36 @@ function buildMenuTemplate() {
         {
           label: (config.hardware && config.hardware.enabled)
             ? (led ? led.status() : "未连接（等待设备）")
+            : "未启用",
+          enabled: false,
+        },
+      ],
+    },
+    {
+      label: "屏幕（ESP32-S3-RLCD）",
+      submenu: [
+        {
+          label: "启用",
+          type: "checkbox",
+          checked: !!(config.screen && config.screen.enabled),
+          click: (item) => applyConfig(
+            { ...config, screen: { ...config.screen, enabled: item.checked } },
+            { reposition: false }
+          ),
+        },
+        {
+          label: "自动识别串口",
+          type: "checkbox",
+          checked: !(config.screen && config.screen.autoPort === false),
+          click: (item) => applyConfig(
+            { ...config, screen: { ...config.screen, autoPort: item.checked } },
+            { reposition: false }
+          ),
+        },
+        { type: "separator" },
+        {
+          label: (config.screen && config.screen.enabled)
+            ? (screenDev ? screenDev.status() : "未连接（等待设备）")
             : "未启用",
           enabled: false,
         },
@@ -542,6 +651,7 @@ app.whenReady().then(() => {
   createBar();
   createTip();
   syncLed();          // 先按 config.hardware 建好 led，再建托盘菜单，避免状态行定格“未启用”
+  syncScreen();       // 同理先建好屏幕板
   createTray();
   wireScreenEvents();
   startScanLoop();
@@ -555,5 +665,7 @@ app.on("window-all-closed", (e) => {
 app.on("before-quit", () => {
   if (scanTimer) clearInterval(scanTimer);
   if (topTimer) clearInterval(topTimer);
+  if (metricsTimer) clearInterval(metricsTimer);
   if (led) { led.close(); led = null; } // 退出前把灯全灭并关串口
+  if (screenDev) { screenDev.close(); screenDev = null; } // 退出前清屏并关串口
 });
