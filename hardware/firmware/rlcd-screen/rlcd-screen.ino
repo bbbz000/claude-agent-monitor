@@ -16,6 +16,7 @@
 // 板卡设置见微雪 Tools-Configuration：Board=ESP32S3 Dev Module, PSRAM=OPI PSRAM,
 // Flash=16MB, USB CDC On Boot=Enabled（这样 Serial 走原生 USB）。
 
+#include <math.h>            // fabsf / lroundf（进度条缓动用）
 #include <ArduinoJson.h>
 #include "ST7305_U8g2.h"
 #include "i2c_bsp.h"
@@ -55,8 +56,10 @@ struct Session {
 static const int MAX_SESS = 8;
 
 static char   g_clock[8] = "";     // PC 下发时钟 HH:MM
-static int    g_cpu = 0;
+static int    g_cpu = 0;           // 目标值（PC 下发的最新采样）
 static int    g_mem = 0;
+static float  g_cpuShown = 0;      // 屏上"当前显示值"，每帧朝目标缓动，数据 1s 一跳时条也平滑滑过去
+static float  g_memShown = 0;
 static int    g_total = 0;         // 会话总数（可能 > 显示条数）
 static Session g_sess[MAX_SESS];
 static int    g_sessCount = 0;
@@ -242,8 +245,14 @@ static void render() {
   u8g2->drawHLine(0, 25, LCD_W);
 
   // ── 指标带 y=28..76（放大条高 18）──
-  drawBar(2, 30, LCD_W - 4, 18, g_cpu, "CPU");
-  drawBar(2, 54, LCD_W - 4, 18, g_mem, "MEM");
+  // 缓动：每帧朝目标滑 ~30%（~8fps 下约 0.5s 到位），差 <0.5 直接吸附，避免无限逼近。
+  // 数据 1s 一跳，但条长/百分比逐帧平滑滑过去，观感连续（近似 TrafficMonitor）。
+  g_cpuShown += (g_cpu - g_cpuShown) * 0.3f;
+  g_memShown += (g_mem - g_memShown) * 0.3f;
+  if (fabsf(g_cpu - g_cpuShown) < 0.5f) g_cpuShown = g_cpu;
+  if (fabsf(g_mem - g_memShown) < 0.5f) g_memShown = g_mem;
+  drawBar(2, 30, LCD_W - 4, 18, (int)lroundf(g_cpuShown), "CPU");
+  drawBar(2, 54, LCD_W - 4, 18, (int)lroundf(g_memShown), "MEM");
   u8g2->drawHLine(0, 78, LCD_W);
 
   // ── 会话列表 y=82..300（字大优先，每条 ~48px，约显 4 条）──

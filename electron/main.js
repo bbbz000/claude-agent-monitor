@@ -310,6 +310,11 @@ function sampleMetrics() {
   }
   lastCpu = cur;
   lastMetrics = { cpu, mem };
+
+  // 把新指标即时推给屏幕（复用上一次扫描的会话列表），让 CPU/内存按 1s 采样节奏刷新，
+  // 而不必等 2s 的磁盘扫描 tick。磁盘扫描很重仍保持 refreshMs；指标采样是纯内存操作，
+  // 每秒推一帧串口开销可忽略（单帧 300-400B，4KB 接收缓冲足够）。
+  if (screenDev && lastRows) screenDev.push(lastRows, { cpu, mem, t: hhmm() });
 }
 
 // ── 扫描 → 只推 state 数组（隐私/性能：不传标题/路径）────
