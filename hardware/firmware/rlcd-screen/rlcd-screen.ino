@@ -68,6 +68,8 @@ static bool   g_thValid = false;
 static int    g_batt = 0;
 static uint32_t g_lastSensorMs = 0;
 static uint32_t g_lastRenderMs = 0;  // 渲染节流时间戳（用 millis 节流，不用 delay 阻塞串口）
+static uint32_t g_lastFrameMs = 0;   // 最近一次收到「数据帧」的时刻。用于推断 USB 在线=充电中：
+                                     // 帧在持续到达 ⇒ 屏幕 USB 接着 PC ⇒ VBUS 供电 ⇒ 电池在充。
 static uint32_t g_rxLines = 0;       // 【诊断】收到的行数（每个非空 \n 计一次）
 static uint32_t g_rxFrames = 0;      // 【诊断】成功解析的帧数（JSON 解析通过，含 off 帧）
 
@@ -92,6 +94,7 @@ static void parseFrame(const char *json, size_t len) {
   if (doc["off"].as<bool>()) { g_off = true; g_gotFrame = true; return; }
   g_off = false;
   g_gotFrame = true;
+  g_lastFrameMs = millis();  // 收到真实数据帧 ⇒ USB 接着 PC ⇒ 判定在充电（见 g_lastFrameMs 注释）
 
   copyStr(g_clock, sizeof(g_clock), doc["t"] | "");
   g_cpu = doc["cpu"] | 0;
@@ -173,6 +176,24 @@ static void drawStateIcon(int cx, int cy, const char *st) {
   else                              u8g2->drawDisc(cx, cy, 3); // RECENT / 其它
 }
 
+// 小电池图标：外框 + 右侧凸头（正极）+ 按电量比例横向填充。(x,y)=电池"身体"左上角。
+// 单色屏无法用颜色表低电，仅用填充长度表示；数字百分比放在图标左侧给精度。
+static void drawBatteryGlyph(int x, int y, int bw, int bh, int pct) {
+  u8g2->drawFrame(x, y, bw, bh);                       // 身体外框
+  int nubH = bh / 2;                                    // 右侧凸头
+  u8g2->drawBox(x + bw, y + (bh - nubH) / 2, 3, nubH);
+  int p = pct < 0 ? 0 : pct > 100 ? 100 : pct;          // 内部填充（夹在 0..100）
+  int innerW = bw - 4;
+  int fill = innerW * p / 100;
+  if (fill > 0) u8g2->drawBox(x + 2, y + 2, fill, bh - 4);
+}
+
+// 充电闪电（约 8x14），(x,y)=左上角。两个实心三角拼出锯齿，单色屏也清晰。
+static void drawBolt(int x, int y) {
+  u8g2->drawTriangle(x + 5, y,     x + 1, y + 8, x + 5, y + 8);
+  u8g2->drawTriangle(x + 3, y + 6, x + 7, y + 6, x + 3, y + 14);
+}
+
 // ── 渲染整屏 ────────────────────────────────────────────
 static void render() {
   u8g2->clearBuffer();
@@ -205,10 +226,19 @@ static void render() {
   u8g2->setFont(u8g2_font_8x13_tf);
   int thw = u8g2->getStrWidth(th);
   u8g2->drawStr((LCD_W - thw) / 2, 18, th);
-  // 右：电池
-  char bat[16];
-  snprintf(bat, sizeof(bat), "BAT %d%%", g_batt);
-  drawRightStr(LCD_W - 2, 18, bat);
+  // 右：电池图标 + 百分比（+ 充电闪电）。从最右往左排：[电池][ 87%][⚡]
+  // 充电判定：3s 内收到过数据帧 ⇒ USB 接着 PC ⇒ 在充电（无硬件充电脚，只能这样推断）。
+  bool charging = (g_lastFrameMs != 0) && (millis() - g_lastFrameMs < 3000);
+  const int battW = 26, battH = 14;            // 电池身体尺寸（含右侧 3px 凸头，实占 29px）
+  int bx = LCD_W - 2 - (battW + 3);            // 电池身体左上角 x（顶到最右，留 3px 凸头空间）
+  int by = 18 - battH + 1;                     // 与 8x13 文字基线对齐
+  drawBatteryGlyph(bx, by, battW, battH, g_batt);
+  char batPct[8];
+  snprintf(batPct, sizeof(batPct), "%d%%", g_batt);
+  u8g2->setFont(u8g2_font_8x13_tf);
+  int pw = u8g2->getStrWidth(batPct);
+  u8g2->drawStr(bx - 4 - pw, 18, batPct);      // 百分比在电池左侧
+  if (charging) drawBolt(bx - 4 - pw - 10, by); // 闪电在百分比左侧
   u8g2->drawHLine(0, 25, LCD_W);
 
   // ── 指标带 y=28..76（放大条高 18）──
