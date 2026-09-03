@@ -79,6 +79,14 @@ static uint32_t g_rxFrames = 0;      // 【诊断】成功解析的帧数（JSON
 // 是否至少收到过一帧（没收到就显示等待提示）
 static bool   g_gotFrame = false;
 
+// ── 待机（无活跃会话超时）─────────────────────────────────
+// 帧里有 WORKING/WAITING 会话即视为「活跃」，刷新 g_lastActiveMs。
+// 连续 IDLE_MS 没有活跃会话 → 进待机：只显大时钟+温湿度/电池，低频刷新、内容微移防残影。
+// WAITING 也算活跃，故待确认的会话永远不会被待机藏起来。串口照常读，一有活动秒级唤醒。
+static const uint32_t IDLE_MS = 2UL * 60 * 60 * 1000; // 空闲多久进待机（2 小时；改这里即可调）
+static uint32_t g_lastActiveMs = 0;              // 最近一次「有活跃会话」的时刻（0=从未活跃过）
+static bool     g_standby = false;               // 当前是否待机（用于状态跳变时强制立即重绘）
+
 // ── 复制字符串到定长缓冲（截断 + 补 0）───────────────────
 static void copyStr(char *dst, size_t cap, const char *src) {
   if (!src) { dst[0] = 0; return; }
@@ -98,6 +106,8 @@ static void parseFrame(const char *json, size_t len) {
   g_off = false;
   g_gotFrame = true;
   g_lastFrameMs = millis();  // 收到真实数据帧 ⇒ USB 接着 PC ⇒ 判定在充电（见 g_lastFrameMs 注释）
+  if (g_lastActiveMs == 0) g_lastActiveMs = g_lastFrameMs;  // 首帧起算待机倒计时：
+      // 让"连上就全是空闲会话"也先完整显示 IDLE_MS 的仪表盘再入睡，而不是一连上就待机。
 
   copyStr(g_clock, sizeof(g_clock), doc["t"] | "");
   g_cpu = doc["cpu"] | 0;
@@ -105,6 +115,7 @@ static void parseFrame(const char *json, size_t len) {
   g_total = doc["total"] | 0;
 
   g_sessCount = 0;
+  bool anyActive = false;   // 本帧是否有活跃会话（WORKING/WAITING）→ 刷新待机计时
   JsonArrayConst arr = doc["sessions"].as<JsonArrayConst>();
   for (JsonObjectConst s : arr) {
     if (g_sessCount >= MAX_SESS) break;
@@ -115,8 +126,10 @@ static void parseFrame(const char *json, size_t len) {
     copyStr(d.pv, sizeof(d.pv), s["pv"] | "");
     d.age = s["age"] | 0;
     d.waiting = s["w"] | false;
+    if (!strcmp(d.st, "WORKING") || !strcmp(d.st, "WAITING")) anyActive = true;
     g_sessCount++;
   }
+  if (anyActive) g_lastActiveMs = millis();  // 有活干 → 刷新活跃时刻，重置待机倒计时
 }
 
 // ── 串口收数：逐字节拼行，遇 \n 解析一帧 ──────────────────
@@ -195,6 +208,38 @@ static void drawBatteryGlyph(int x, int y, int bw, int bh, int pct) {
 static void drawBolt(int x, int y) {
   u8g2->drawTriangle(x + 5, y,     x + 1, y + 8, x + 5, y + 8);
   u8g2->drawTriangle(x + 3, y + 6, x + 7, y + 6, x + 3, y + 14);
+}
+
+// ── 待机画面 ────────────────────────────────────────────
+// 无活跃会话超时后显示：大时钟居中 + 温湿度/电池一行 + 右下"待机"小字。
+// 低频刷新（loop 里降到 ~20s 一次），内容按分钟在 ±3px 内微移，长期常显不积残影。
+// 右下角"待机"二字是刻意留的：让你一眼区分"是待机"还是"又卡死了"（有过卡死前科）。
+static void renderStandby() {
+  u8g2->clearBuffer();
+  u8g2->setDrawColor(1);
+
+  // 防残影微移：整屏在 ±3px 内缓慢漂移，各轴换位周期错开（3min / 3.5min），避免像素长期常亮。
+  int ox = (int)((millis() / 180000UL) % 7) - 3;
+  int oy = (int)((millis() / 210000UL) % 7) - 3;
+
+  // 大时钟（logisoso32 数字体，含冒号）。若该字体未随库编入导致编译报错，改用 u8g2_font_10x20_tf。
+  u8g2->setFont(u8g2_font_logisoso32_tn);
+  const char *clk = g_clock[0] ? g_clock : "--:--";
+  int cw = u8g2->getStrWidth(clk);
+  u8g2->drawStr((LCD_W - cw) / 2 + ox, 158 + oy, clk);
+
+  // 温湿度 + 电池一行（证明板子活着、传感器在读）
+  char line[48];
+  snprintf(line, sizeof(line), "%.1fC %.0f%%RH   BAT %d%%", g_temp, g_humi, g_batt);
+  u8g2->setFont(u8g2_font_8x13_tf);
+  int lw = u8g2->getStrWidth(line);
+  u8g2->drawStr((LCD_W - lw) / 2 + ox, 196 + oy, line);
+
+  // 右下"待机"小字
+  u8g2->setFont(u8g2_font_wqy16_t_gb2312);
+  drawRightStr(LCD_W - 4 + ox, LCD_H - 6 + oy, "待机");
+
+  u8g2->sendBuffer();
 }
 
 // ── 渲染整屏 ────────────────────────────────────────────
@@ -329,12 +374,24 @@ void loop() {
   pumpSerial();
   sampleSensors();  // 本地温湿度/电池（内部限频 2s）
 
-  // 渲染用 millis 节流（~8fps），不用 delay 阻塞：render 期间不读串口，节流本身只决定"多久重绘一次"。
   uint32_t now = millis();
-  if (g_lastRenderMs == 0 || (now - g_lastRenderMs) >= 120) {
+
+  // 待机判定：已收到过帧、非 off、且「连续 IDLE_MS 没有活跃会话」→ 待机。
+  // g_lastActiveMs 在首帧被 parseFrame 置为收帧时刻，之后仅在有 WORKING/WAITING 时刷新，
+  // 所以"连上就全空闲"会先显示 IDLE_MS 的仪表盘再入睡（不会一连上就待机）。
+  bool standby = g_gotFrame && !g_off && g_lastActiveMs != 0 && (now - g_lastActiveMs >= IDLE_MS);
+
+  // 活跃 ↔ 待机 跳变：强制立即重绘一次（否则待机的 20s 慢节流会让唤醒/入睡都有明显延迟）。
+  bool transitioned = (standby != g_standby);
+  g_standby = standby;
+
+  // 渲染节流：活跃 ~8fps（120ms）流畅；待机 ~20s 一次（低频省刷、配合微移防残影）。
+  uint32_t interval = standby ? 20000UL : 120UL;
+  if (transitioned || g_lastRenderMs == 0 || (now - g_lastRenderMs) >= interval) {
     g_lastRenderMs = now;
     pumpSerial();   // 渲染前再抽一次，尽量让屏上是最新帧
-    render();
+    if (standby) renderStandby();
+    else         render();
     pumpSerial();   // 渲染后立刻再抽一次，补上渲染 flush 期间涌入的字节
   }
   delay(2);         // 让出 CPU / 喂看门狗；2ms@115200 仅 ~23 字节，远小于接收缓冲，不会丢
