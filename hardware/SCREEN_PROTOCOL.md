@@ -26,6 +26,7 @@ PC 端 `hardware/screen-serial.js`（编码在 `hardware/screen-frame.js`）与�
 | `cpu` | int 0-100 | CPU 使用率百分比 |
 | `mem` | int 0-100 | 内存使用率百分比 |
 | `total` | int | 会话总数（可能 > `sessions` 长度，固件用来提示 `+N 更多`） |
+| `act` | int 0/1 | 用户近期有输入活动（鼠标/键盘，PC 端 `powerMonitor.getSystemIdleTime()<10s`）。固件视同"有活跃会话"，用于从待机唤醒并维持不待机。省略/0=无活动 |
 | `sessions` | array | 会话列表，已按 age 升序（最活跃在前，PC 已排好）。PC 截断到 `maxSessions` 条 |
 
 ### 单条会话（`sessions[]`）

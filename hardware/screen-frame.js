@@ -42,7 +42,7 @@ function slimSession(row) {
 /**
  * 构造屏幕板一帧。rows 已按 ageSec 升序（最活跃在前，见 core/scanner.js）。
  * @param {Array} rows                scan() 返回的完整行数组
- * @param {Object} [metrics]          { t?:string(HH:MM), cpu?:number, mem?:number }
+ * @param {Object} [metrics]          { t?:string(HH:MM), cpu?:number, mem?:number, act?:boolean }
  * @param {number} [maxSessions]      最多带几条会话
  * @returns {string} 一行 JSON + "\n"
  */
@@ -54,6 +54,7 @@ export function buildScreenFrame(rows = [], metrics = {}, maxSessions = DEFAULT_
     cpu: clampPct(metrics.cpu),
     mem: clampPct(metrics.mem),
     total: (rows || []).length, // 会话总数（可能 > 显示条数，屏幕可提示 +N）
+    act: metrics.act ? 1 : 0,   // 用户近期有输入（鼠标/键盘）→ 固件用来唤醒/维持不待机
     sessions,
   };
   return JSON.stringify(frame) + "\n";

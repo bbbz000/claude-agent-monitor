@@ -1,7 +1,7 @@
 // electron/main.js
 // 主进程：建置顶小条窗 + 定时 scan + IPC + 多屏定位 + 右键菜单/Tray + 设置窗口。
 // 默认用不透明胶囊窗（真透明窗在部分 Windows 上不合成会整窗看不见）；--transparent 可试真透明。
-import { app, BrowserWindow, ipcMain, Menu, Tray, screen, nativeImage } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, Tray, screen, nativeImage, powerMonitor } from "electron";
 import path from "path";
 import { scan } from "../core/scanner.js";
 import { allProviders, listMeta } from "../core/providers/registry.js";
@@ -280,6 +280,17 @@ function hhmm() {
   return `${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+// 用户近期是否有输入活动（鼠标移动/点击、键盘）。用于屏幕待机唤醒：
+// powerMonitor.getSystemIdleTime() 返回距上次系统级输入的秒数（鼠标+键盘，非仅鼠标）。
+// <10s 视为"活跃"，随帧下发 act=1，固件据此唤醒/维持不待机。
+function userActive() {
+  try {
+    return powerMonitor.getSystemIdleTime() < 10;
+  } catch {
+    return false; // 某些平台/环境取不到 → 当作无活动，不影响会话活跃驱动的待机逻辑
+  }
+}
+
 // 汇总所有核心的 times，返回 { idle, total }。
 function cpuTimesSum() {
   const cpus = os.cpus() || [];
@@ -314,7 +325,7 @@ function sampleMetrics() {
   // 把新指标即时推给屏幕（复用上一次扫描的会话列表），让 CPU/内存按 1s 采样节奏刷新，
   // 而不必等 2s 的磁盘扫描 tick。磁盘扫描很重仍保持 refreshMs；指标采样是纯内存操作，
   // 每秒推一帧串口开销可忽略（单帧 300-400B，4KB 接收缓冲足够）。
-  if (screenDev && lastRows) screenDev.push(lastRows, { cpu, mem, t: hhmm() });
+  if (screenDev && lastRows) screenDev.push(lastRows, { cpu, mem, t: hhmm(), act: userActive() });
 }
 
 // ── 扫描 → 只推 state 数组（隐私/性能：不传标题/路径）────
@@ -335,7 +346,7 @@ function tick() {
     // 连接状态变化由 LedSerial 的 onChange 回调驱动 rebuildMenus（跳变发生在 tick 之间，轮询会漏）。
     if (led) led.push(rows);
     // 屏幕板：把完整 rows + 最近系统指标 + 当前时钟编码成 JSON 帧写串口（同样懒连接/不阻塞）。
-    if (screenDev) screenDev.push(rows, { cpu: lastMetrics.cpu, mem: lastMetrics.mem, t: hhmm() });
+    if (screenDev) screenDev.push(rows, { cpu: lastMetrics.cpu, mem: lastMetrics.mem, t: hhmm(), act: userActive() });
     // 圆点单位数变化 → 重算窗口宽度并重定位（右边缘固定）
     const units = dotUnits(states);
     if (units !== lastUnits) {

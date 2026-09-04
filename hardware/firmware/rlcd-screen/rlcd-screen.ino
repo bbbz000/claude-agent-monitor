@@ -81,7 +81,7 @@ static bool   g_gotFrame = false;
 // 帧里有 WORKING/WAITING 会话即视为「活跃」，刷新 g_lastActiveMs。
 // 连续 IDLE_MS 没有活跃会话 → 进待机：只显大时钟+温湿度/电池，低频刷新、内容微移防残影。
 // WAITING 也算活跃，故待确认的会话永远不会被待机藏起来。串口照常读，一有活动秒级唤醒。
-static const uint32_t IDLE_MS = 2UL * 60 * 60 * 1000; // 空闲多久进待机（2 小时；改这里即可调）
+static const uint32_t IDLE_MS = 15UL * 60 * 1000; // 空闲多久进待机（15 分钟；改这里即可调）
 static uint32_t g_lastActiveMs = 0;              // 最近一次「有活跃会话」的时刻（0=从未活跃过）
 static bool     g_standby = false;               // 当前是否待机（用于状态跳变时强制立即重绘）
 
@@ -111,8 +111,10 @@ static void parseFrame(const char *json, size_t len) {
   g_mem = doc["mem"] | 0;
   g_total = doc["total"] | 0;
 
+  // act=1：PC 端检测到用户近期有输入（鼠标移动/点击/键盘）。等同于"有活跃会话"，
+  // 用来把屏幕从待机唤醒、并在你用电脑期间维持不待机。
+  bool anyActive = (doc["act"] | 0) != 0;
   g_sessCount = 0;
-  bool anyActive = false;   // 本帧是否有活跃会话（WORKING/WAITING）→ 刷新待机计时
   JsonArrayConst arr = doc["sessions"].as<JsonArrayConst>();
   for (JsonObjectConst s : arr) {
     if (g_sessCount >= MAX_SESS) break;
