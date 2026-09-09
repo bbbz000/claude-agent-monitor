@@ -60,6 +60,8 @@ static int    g_cpu = 0;           // 目标值（PC 下发的最新采样）
 static int    g_mem = 0;
 static float  g_cpuShown = 0;      // 屏上"当前显示值"，每帧朝目标缓动，数据 1s 一跳时条也平滑滑过去
 static float  g_memShown = 0;
+static float  g_cpuShownSlow = 0;  // "慢条"显示值：缓动系数更小、追得更慢，画在快条底层做半透明拖影
+static float  g_memShownSlow = 0;
 static int    g_total = 0;         // 会话总数（可能 > 显示条数）
 static Session g_sess[MAX_SESS];
 static int    g_sessCount = 0;
@@ -166,8 +168,19 @@ static void drawRightStr(int xRight, int y, const char *s) {
   u8g2->drawUTF8(xRight - w, y, s);
 }
 
-// 画一个 0..100 的百分比条（label 在左，条在右）
-static void drawBar(int x, int y, int w, int h, int pct, const char *label) {
+// 棋盘点阵填一个矩形：隔一个像素点亮一个。单色屏没有真正的 alpha，
+// 这种 50% 抖动在反射屏上肉眼看就是一片"半透明灰"，用来当慢条的底影。
+static void drawHalftoneBox(int x, int y, int w, int h) {
+  for (int j = 0; j < h; j++)
+    for (int i = 0; i < w; i++)
+      if (((x + i) + (y + j)) & 1) u8g2->drawPixel(x + i, y + j);
+}
+
+// 画一个 0..100 的百分比条（label 在左，条在右）。
+// pct 是"快条"（实心，跟得紧）；pctSlow 是"慢条"（点阵半透明，追得慢）。
+// 慢条先画在底层：值骤降时它作为拖影留在快条右侧，值骤升时快条实心尖端探出到它前面，
+// 两条错位就是肉眼可见的"惯性差"。
+static void drawBar(int x, int y, int w, int h, int pct, int pctSlow, const char *label) {
   u8g2->setFont(u8g2_font_8x13_tf);      // 放大：标签/百分比用 8x13
   u8g2->drawStr(x, y + h - 3, label);
   int labelW = 40;                       // "CPU"/"MEM"（8x13 约 24px）+ 间隔
@@ -175,8 +188,11 @@ static void drawBar(int x, int y, int w, int h, int pct, const char *label) {
   int bw = w - labelW - 46;              // 右侧留 46px 显 "100%"（8x13）
   if (bw < 10) bw = 10;
   u8g2->drawFrame(bx, y, bw, h);
-  int fill = (bw - 2) * (pct < 0 ? 0 : pct > 100 ? 100 : pct) / 100;
-  if (fill > 0) u8g2->drawBox(bx + 1, y + 1, fill, h - 2);
+  int inner = bw - 2;
+  int fill     = inner * (pct     < 0 ? 0 : pct     > 100 ? 100 : pct)     / 100;
+  int fillSlow = inner * (pctSlow < 0 ? 0 : pctSlow > 100 ? 100 : pctSlow) / 100;
+  if (fillSlow > 0) drawHalftoneBox(bx + 1, y + 1, fillSlow, h - 2); // 底层：慢条点阵
+  if (fill > 0)     u8g2->drawBox(bx + 1, y + 1, fill, h - 2);       // 上层：快条实心
   char pctStr[8];
   snprintf(pctStr, sizeof(pctStr), "%d%%", pct);
   u8g2->drawStr(bx + bw + 5, y + h - 3, pctStr);
@@ -295,8 +311,19 @@ static void render() {
   g_memShown += (g_mem - g_memShown) * 0.3f;
   if (fabsf(g_cpu - g_cpuShown) < 0.5f) g_cpuShown = g_cpu;
   if (fabsf(g_mem - g_memShown) < 0.5f) g_memShown = g_mem;
-  drawBar(2, 30, LCD_W - 4, 18, (int)lroundf(g_cpuShown), "CPU");
-  drawBar(2, 54, LCD_W - 4, 18, (int)lroundf(g_memShown), "MEM");
+  // 慢条：上升时追上快条即吸附齐平；下降时以"固定速度"匀速回落——
+  // 每帧减固定百分点（与当前差值无关），而不是比例缓动那种越接近越慢的指数尾巴。
+  // 这样点阵尾影是匀速缩短的，节奏恒定。慢条恒 >= 快条，尾影只在快条上方。
+  // 渲染节流 ~120ms/帧（~8fps），SLOW_FALL_PER_FRAME=0.5 ≈ 4%/s 的回落速度，可调。
+  static const float SLOW_FALL_PER_FRAME = 0.5f;
+  if (g_cpuShown >= g_cpuShownSlow) g_cpuShownSlow = g_cpuShown;         // 快条更高：立刻齐平
+  else { g_cpuShownSlow -= SLOW_FALL_PER_FRAME;                         // 快条更低：匀速下落
+         if (g_cpuShownSlow < g_cpuShown) g_cpuShownSlow = g_cpuShown; } // 不穿过快条
+  if (g_memShown >= g_memShownSlow) g_memShownSlow = g_memShown;
+  else { g_memShownSlow -= SLOW_FALL_PER_FRAME;
+         if (g_memShownSlow < g_memShown) g_memShownSlow = g_memShown; }
+  drawBar(2, 30, LCD_W - 4, 18, (int)lroundf(g_cpuShown), (int)lroundf(g_cpuShownSlow), "CPU");
+  drawBar(2, 54, LCD_W - 4, 18, (int)lroundf(g_memShown), (int)lroundf(g_memShownSlow), "MEM");
   u8g2->drawHLine(0, 78, LCD_W);
 
   // ── 会话列表 y=82..300（字大优先，每条 ~48px，约显 4 条）──
