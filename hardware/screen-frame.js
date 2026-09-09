@@ -29,7 +29,7 @@ function truncate(s, n) {
 
 // 把一行 scan 结果裁成屏幕帧里的紧凑单条。
 function slimSession(row) {
-  return {
+  const s = {
     st: row.state || "",                          // 状态：WORKING/WAITING/DONE/RECENT
     ti: truncate(row.title, MAX_TITLE),           // 标题（截断）
     pj: truncate(row.project, MAX_PROJECT),       // 项目名（截断）
@@ -37,6 +37,9 @@ function slimSession(row) {
     age: Math.round(row.ageSec || 0),             // 距今秒数（整数）
     w: isWaiting(row.state),                       // 是否等待确认 → 驱动边框闪烁
   };
+  // 上下文占用%（0..100）。null=非 Claude/读不到 usage → 省略该字段省带宽，固件按"未知"不显示。
+  if (row.ctxPct != null) s.cx = clampPct(row.ctxPct);
+  return s;
 }
 
 /**

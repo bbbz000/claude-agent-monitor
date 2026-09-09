@@ -15,7 +15,7 @@ PC 端 `hardware/screen-serial.js`（编码在 `hardware/screen-frame.js`）与�
 一帧 = 一行 JSON 对象 + `\n`。示例：
 
 ```json
-{"t":"14:32","cpu":37,"mem":68,"total":8,"sessions":[{"st":"WORKING","ti":"重构扫描器","pj":"claude-agent-monitor","pv":"Claude Code","age":12,"w":false},{"st":"WAITING","ti":"改协议","pj":"foo","pv":"OpenCode","age":3,"w":true}]}
+{"t":"14:32","cpu":37,"mem":68,"total":8,"sessions":[{"st":"WORKING","ti":"重构扫描器","pj":"claude-agent-monitor","pv":"Claude Code","age":12,"w":false,"cx":42},{"st":"WAITING","ti":"改协议","pj":"foo","pv":"OpenCode","age":3,"w":true}]}
 ```
 
 ### 顶层字段
@@ -39,6 +39,7 @@ PC 端 `hardware/screen-serial.js`（编码在 `hardware/screen-frame.js`）与�
 | `pv` | string | 来源可读名，如 `Claude Code` / `OpenCode` |
 | `age` | int | 距今秒数 |
 | `w` | bool | 是否等待你确认（`true` → 固件给该条画**闪烁边框**提醒） |
+| `cx` | int 0-100 | 上下文占用率%（该会话已用掉的上下文窗口比例）。**仅 Claude 会话有**（PC 从 `.jsonl` 最后一条 assistant 的 `usage` 算出）；非 Claude 或读不到时**省略该字段**，固件不显示 |
 
 ### 清屏帧（off）
 

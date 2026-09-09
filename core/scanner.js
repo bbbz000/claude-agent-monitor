@@ -46,7 +46,7 @@ export function scan({
       if (ageSec > recentSec) continue; // 只保留近 recentSec 内活动过的
 
       const meta = safe(() => p.parseMeta(s.file), { title: "(无标题)" });
-      const sig = safe(() => p.parseActivity(s.file, s.size), { activity: "", done: false, waiting: false });
+      const sig = safe(() => p.parseActivity(s.file, s.size), { activity: "", done: false, waiting: false, ctxPct: null });
       const { state, activity } = classify({ ageSec, sig, workingSec });
 
       rows.push({
@@ -56,6 +56,7 @@ export function scan({
         state,
         ageSec,
         activity,
+        ctxPct: sig.ctxPct == null ? null : sig.ctxPct,  // 上下文占用%（0..100）；读不到/非 Claude=null
         title: meta.title,
         project: s.project,
         mtime: new Date(s.mtimeMs),

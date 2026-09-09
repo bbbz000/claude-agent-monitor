@@ -52,6 +52,7 @@ struct Session {
   char pv[32];   // 来源
   int  age;      // 秒
   bool waiting;  // 是否等待确认（边框闪烁）
+  int  ctx;      // 上下文占用%（0..100）；-1=未知（非 Claude/PC 省略了 cx 字段）→ 不显示
 };
 static const int MAX_SESS = 8;
 
@@ -127,6 +128,7 @@ static void parseFrame(const char *json, size_t len) {
     copyStr(d.pv, sizeof(d.pv), s["pv"] | "");
     d.age = s["age"] | 0;
     d.waiting = s["w"] | false;
+    d.ctx = s["cx"] | -1;   // PC 省略 cx（非 Claude/读不到）→ -1，渲染时不显示
     if (!strcmp(d.st, "WORKING") || !strcmp(d.st, "WAITING")) anyActive = true;
     g_sessCount++;
   }
@@ -196,6 +198,21 @@ static void drawBar(int x, int y, int w, int h, int pct, int pctSlow, const char
   char pctStr[8];
   snprintf(pctStr, sizeof(pctStr), "%d%%", pct);
   u8g2->drawStr(bx + bw + 5, y + h - 3, pctStr);
+}
+
+// 每条会话下的「上下文占用」细条：纯实心填充（不像 CPU/MEM 那样有快/慢拖影——
+// ctx 是每帧一个定值，无惯性可言）。条在左，百分比数字紧贴条右侧。
+// 调用方需保证 pct>=0（-1=未知的会话不画本条）。
+static void drawCtxBar(int x, int y, int w, int h, int pct) {
+  int p = pct < 0 ? 0 : pct > 100 ? 100 : pct;
+  u8g2->drawFrame(x, y, w, h);
+  int inner = w - 2;
+  int fill = inner * p / 100;
+  if (fill > 0) u8g2->drawBox(x + 1, y + 1, fill, h - 2);
+  char s[8];
+  snprintf(s, sizeof(s), "%d%%", p);
+  u8g2->setFont(u8g2_font_6x10_tf);      // 小字号，别和会话文字抢高度
+  u8g2->drawStr(x + w + 6, y + h, s);    // 数字贴条右侧，基线约与条底对齐
 }
 
 // 状态图标：用简单几何形区分（单色屏无颜色）
@@ -326,9 +343,9 @@ static void render() {
   drawBar(2, 54, LCD_W - 4, 18, (int)lroundf(g_memShown), (int)lroundf(g_memShownSlow), "MEM");
   u8g2->drawHLine(0, 78, LCD_W);
 
-  // ── 会话列表 y=82..300（字大优先，每条 ~48px，约显 4 条）──
+  // ── 会话列表 y=82..300（字大优先，每条 ~54px，约显 4 条）──
   int y = 82;
-  const int ROW_H = 48;   // 每条：标题行(16px) + meta 行(16px) + 间距
+  const int ROW_H = 54;   // 每条：标题行(16px) + meta 行(16px) + 上下文条(8px) + 间距
   bool blinkOn = (millis() / 500) % 2 == 0; // WAITING 边框闪烁节拍
   for (int i = 0; i < g_sessCount; i++) {
     if (y + ROW_H > LCD_H) break; // 放不下就停
@@ -349,6 +366,10 @@ static void render() {
     char meta[160];
     snprintf(meta, sizeof(meta), "%s · %s · %ds", s.pj, s.pv, s.age);
     u8g2->drawUTF8(26, top + 38, meta);
+
+    // 行3：上下文占用条（仅 Claude 会话有 cx；非 Claude/读不到时 ctx=-1，不画本条）。
+    // 条画在 meta 行下方，8px 高、120px 宽，百分比数字由 drawCtxBar 贴在条右侧。
+    if (s.ctx >= 0) drawCtxBar(26, top + 42, 120, 8, s.ctx);
 
     y += ROW_H;
   }

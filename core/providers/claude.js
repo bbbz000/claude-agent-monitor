@@ -73,10 +73,45 @@ function toolActivity(name) {
 // 需要用户回应的工具：命中即视为 WAITING（等待你确认/回答）
 const WAITING_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode", "EnterPlanMode"]);
 
-// 读尾部推断当前处于什么阶段。返回 { activity, done, waiting }
+// ── 上下文占用率 ─────────────────────────────────────
+// Opus/Sonnet 标准上下文窗口 20 万 token。Claude 每轮都把完整历史重新发给模型，
+// 所以「最后一条 assistant 消息的 usage」里的各类输入 token 之和，就是当前上下文占用量。
+const CTX_WINDOW = 200000;
+
+// 从一条 message.usage 求上下文占用百分比。
+// input_tokens=本轮新读入，cache_creation/cache_read=命中/写入的 prompt 缓存——
+// 三者都是「这一轮喂进模型的上下文」，相加才是真实占用；output_tokens 是生成的、不算进上下文。
+function ctxPctFromUsage(u) {
+  if (!u) return null;
+  const t = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
+  if (t <= 0) return null;
+  const pct = Math.round((t / CTX_WINDOW) * 100);
+  return pct < 0 ? 0 : pct > 100 ? 100 : pct;
+}
+
+// 从尾部行里，从后往前找第一条带 usage 的 assistant 消息，算上下文占用%。找不到→null。
+// （末尾常有 custom-title 等无 usage 的元数据行，或 user/tool_result 行，都跳过继续往前找。）
+function lastCtxPct(lines) {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let o; try { o = JSON.parse(lines[i]); } catch { continue; }
+    if (o.type === "assistant" && o.message && o.message.usage) {
+      const p = ctxPctFromUsage(o.message.usage);
+      if (p != null) return p;
+    }
+  }
+  return null;
+}
+
+// 读尾部推断当前处于什么阶段。返回 { activity, done, waiting, ctxPct }
+// ctxPct=当前上下文占用%（0..100），非 Claude/读不到 usage 时为 null。
+// tail 读 32KB（比判活所需的 8KB 大）：最后一轮 assistant 回复可能较长，
+// 读小了会把带 usage 的那行截断成半行 → JSON 解析失败 → 取不到占用率。
 function parseActivityFor(fp, size) {
+  let ctxPct = null;
   try {
-    const lines = readTail(fp, size).split("\n").filter(Boolean);
+    const lines = readTail(fp, size, 32768).split("\n").filter(Boolean);
+    ctxPct = lastCtxPct(lines);
+    const R = (activity, done, waiting) => ({ activity, done, waiting, ctxPct });
     // 从后往前找第一条“实质消息”（assistant / user），跳过 last-prompt /
     // custom-title / ai-title / mode 等收尾元数据行——它们常追加在会话末尾，
     // 是“本轮已结束”的信号，而不是还在运行。
@@ -89,26 +124,24 @@ function parseActivityFor(fp, size) {
           const c = o.message.content;
           const tu = Array.isArray(c) ? c.filter((x) => x.type === "tool_use").pop() : null;
           const name = tu && tu.name;
-          if (name && WAITING_TOOLS.has(name)) {
-            return { activity: "等待你确认/回答", done: false, waiting: true };
-          }
-          return { activity: toolActivity(name), done: false, waiting: false };
+          if (name && WAITING_TOOLS.has(name)) return R("等待你确认/回答", false, true);
+          return R(toolActivity(name), false, false);
         }
         if (stop === "end_turn" || stop === "stop_sequence" || stop === "max_tokens")
-          return { activity: "已回复", done: true, waiting: false };
+          return R("已回复", true, false);
         // stop_reason 为 null / 缺失：多为流式写入中，确实在生成
-        return { activity: "AI 回复中", done: false, waiting: false };
+        return R("AI 回复中", false, false);
       }
 
       if (o.type === "user" && o.message) {
         const c = o.message.content;
         const isToolResult = Array.isArray(c) && c.some((x) => x.type === "tool_result");
-        if (isToolResult) return { activity: "工具执行中", done: false, waiting: false };
-        return { activity: "等待 AI", done: false, waiting: false };
+        if (isToolResult) return R("工具执行中", false, false);
+        return R("等待 AI", false, false);
       }
     }
   } catch {}
-  return { activity: "", done: false, waiting: false };
+  return { activity: "", done: false, waiting: false, ctxPct };
 }
 
 // ── 发现会话文件 ─────────────────────────────────────
