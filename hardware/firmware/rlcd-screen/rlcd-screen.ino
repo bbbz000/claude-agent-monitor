@@ -53,6 +53,7 @@ struct Session {
   int  age;      // 秒
   bool waiting;  // 是否等待确认（边框闪烁）
   int  ctx;      // 上下文占用%（0..100）；-1=未知（非 Claude/PC 省略了 cx 字段）→ 不显示
+  int  life;     // 剩余存活%（0..100）＝消失倒计时；-1=PC 未下发 lf → 不画（正常恒有值）
 };
 static const int MAX_SESS = 8;
 
@@ -129,6 +130,7 @@ static void parseFrame(const char *json, size_t len) {
     d.age = s["age"] | 0;
     d.waiting = s["w"] | false;
     d.ctx = s["cx"] | -1;   // PC 省略 cx（非 Claude/读不到）→ -1，渲染时不显示
+    d.life = s["lf"] | -1;  // 剩余存活%＝消失倒计时；PC 恒下发，-1 仅作兜底不画
     if (!strcmp(d.st, "WORKING") || !strcmp(d.st, "WAITING")) anyActive = true;
     g_sessCount++;
   }
@@ -213,6 +215,19 @@ static void drawCtxBar(int x, int y, int w, int h, int pct) {
   snprintf(s, sizeof(s), "%d%%", p);
   u8g2->setFont(u8g2_font_6x10_tf);      // 小字号，别和会话文字抢高度
   u8g2->drawStr(x + w + 6, y + h, s);    // 数字贴条右侧，基线约与条底对齐
+}
+
+// 每条会话的「剩余存活」条＝消失倒计时：本条超过 recentSec 未活动就会从列表消失，
+// 满=刚活动过、空=即将消失。画在 ctx 条右侧、同一行（不占额外垂直空间），
+// 用点阵半透明填充（drawHalftoneBox）与实心的 ctx 条区分开——点阵的"淡"也正好呼应"正在消退"。
+// 不画百分比数字：同一行已有 ctx 的数字，再加一个易混；条本身足够表达倒计时。
+// 调用方需保证 pct>=0（-1=PC 未下发，不画）。
+static void drawLifeBar(int x, int y, int w, int h, int pct) {
+  int p = pct < 0 ? 0 : pct > 100 ? 100 : pct;
+  u8g2->drawFrame(x, y, w, h);
+  int inner = w - 2;
+  int fill = inner * p / 100;
+  if (fill > 0) drawHalftoneBox(x + 1, y + 1, fill, h - 2);
 }
 
 // 状态图标：用简单几何形区分（单色屏无颜色）
@@ -362,14 +377,21 @@ static void render() {
     u8g2->setFont(u8g2_font_wqy16_t_gb2312);
     u8g2->drawUTF8(26, top + 16, s.ti);
 
-    // 行2：项目 · 来源 · age（同样 wqy16，字大优先）
+    // 行2：项目 · 来源（同样 wqy16，字大优先）。
+    // age 秒数不再单列：它已被行3的存活条（消失倒计时）可视化表达，同行留数字反而冗余。
     char meta[160];
-    snprintf(meta, sizeof(meta), "%s · %s · %ds", s.pj, s.pv, s.age);
+    snprintf(meta, sizeof(meta), "%s · %s", s.pj, s.pv);
     u8g2->drawUTF8(26, top + 38, meta);
 
     // 行3：上下文占用条（仅 Claude 会话有 cx；非 Claude/读不到时 ctx=-1，不画本条）。
-    // 条画在 meta 行下方，8px 高、120px 宽，百分比数字由 drawCtxBar 贴在条右侧。
+    // 条画在 meta 行下方，8px 高、120px 宽，百分比数字由 drawCtxBar 贴在条右侧（数字尾约到 x≈176）。
     if (s.ctx >= 0) drawCtxBar(26, top + 42, 120, 8, s.ctx);
+
+    // 行3 同一行右侧：剩余存活条＝消失倒计时（点阵半透明，与实心 ctx 条区分）。
+    // 固定列 x=190（在 ctx 数字之后），宽 190→到 x=380（留 20px 右边距），高 8、与 ctx 条同一 y。
+    // 固定列而非紧贴 ctx 尾：让每行的存活条对齐成一竖列，跨行扫读更快；非 Claude 行左侧空着可接受。
+    // 不占额外垂直空间——完全落在 ctx 条那一行的空白横向区。
+    if (s.life >= 0) drawLifeBar(190, top + 42, 190, 8, s.life);
 
     y += ROW_H;
   }

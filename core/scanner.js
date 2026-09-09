@@ -49,6 +49,13 @@ export function scan({
       const sig = safe(() => p.parseActivity(s.file, s.size), { activity: "", done: false, waiting: false, ctxPct: null });
       const { state, activity } = classify({ ageSec, sig, workingSec });
 
+      // 剩余存活%：本条超过 recentSec 未活动就会被上面 `continue` 过滤掉、从列表消失。
+      // 故 (recentSec - ageSec)/recentSec 就是"消失倒计时"——刚动过=100（满），临界=0（空）。
+      // WORKING 会话文件持续更新、age 恒小 → 恒接近满，不会莫名倒计时；符合直觉。
+      const lifePct = recentSec > 0
+        ? Math.max(0, Math.min(100, Math.round(((recentSec - ageSec) / recentSec) * 100)))
+        : 0;
+
       rows.push({
         provider: p.id,          // ← 来源标识（id，用于逻辑/过滤）
         providerLabel: p.label,  // ← 来源可读名（如 "Claude Code"，供前端直接展示，免查表）
@@ -57,6 +64,7 @@ export function scan({
         ageSec,
         activity,
         ctxPct: sig.ctxPct == null ? null : sig.ctxPct,  // 上下文占用%（0..100）；读不到/非 Claude=null
+        lifePct,                                          // 剩余存活%（0..100）：距被 recentSec 过滤消失的倒计时
         title: meta.title,
         project: s.project,
         mtime: new Date(s.mtimeMs),

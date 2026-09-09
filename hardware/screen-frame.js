@@ -39,6 +39,9 @@ function slimSession(row) {
   };
   // 上下文占用%（0..100）。null=非 Claude/读不到 usage → 省略该字段省带宽，固件按"未知"不显示。
   if (row.ctxPct != null) s.cx = clampPct(row.ctxPct);
+  // 剩余存活%（0..100）：距本条因超过 recentSec 未活动被过滤、从列表消失的倒计时。
+  // 满=刚活动过，空=即将消失。所有会话都有（scan 恒算出），固件画在 ctx 条右侧、同一行。
+  if (row.lifePct != null) s.lf = clampPct(row.lifePct);
   return s;
 }
 

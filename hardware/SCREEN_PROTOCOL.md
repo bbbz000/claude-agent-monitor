@@ -15,7 +15,7 @@ PC 端 `hardware/screen-serial.js`（编码在 `hardware/screen-frame.js`）与�
 一帧 = 一行 JSON 对象 + `\n`。示例：
 
 ```json
-{"t":"14:32","cpu":37,"mem":68,"total":8,"sessions":[{"st":"WORKING","ti":"重构扫描器","pj":"claude-agent-monitor","pv":"Claude Code","age":12,"w":false,"cx":42},{"st":"WAITING","ti":"改协议","pj":"foo","pv":"OpenCode","age":3,"w":true}]}
+{"t":"14:32","cpu":37,"mem":68,"total":8,"sessions":[{"st":"WORKING","ti":"重构扫描器","pj":"claude-agent-monitor","pv":"Claude Code","age":12,"w":false,"cx":42,"lf":96},{"st":"WAITING","ti":"改协议","pj":"foo","pv":"OpenCode","age":3,"w":true,"lf":99}]}
 ```
 
 ### 顶层字段
@@ -40,6 +40,7 @@ PC 端 `hardware/screen-serial.js`（编码在 `hardware/screen-frame.js`）与�
 | `age` | int | 距今秒数 |
 | `w` | bool | 是否等待你确认（`true` → 固件给该条画**闪烁边框**提醒） |
 | `cx` | int 0-100 | 上下文占用率%（该会话已用掉的上下文窗口比例）。**仅 Claude 会话有**（PC 从 `.jsonl` 最后一条 assistant 的 `usage` 算出）；非 Claude 或读不到时**省略该字段**，固件不显示 |
+| `lf` | int 0-100 | 剩余存活比例%＝消失倒计时。本条超过 `recentSec`（默认 300s）未活动就会被 PC 过滤、从列表消失；`lf=(recentSec-age)/recentSec×100`：满=刚活动过，空=即将消失。**所有会话都有**（PC 恒算出）。固件画在 `cx` 条右侧、**同一行**（不占额外垂直空间），用点阵半透明填充与实心的 `cx` 条区分 |
 
 ### 清屏帧（off）
 
