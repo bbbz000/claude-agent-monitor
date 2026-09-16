@@ -202,15 +202,15 @@ static void drawBar(int x, int y, int w, int h, int pct, int pctSlow, const char
   u8g2->drawStr(bx + bw + 5, y + h - 3, pctStr);
 }
 
-// 每条会话下的「上下文占用」细条：纯实心填充（不像 CPU/MEM 那样有快/慢拖影——
-// ctx 是每帧一个定值，无惯性可言）。条在左，百分比数字紧贴条右侧。
+// 每条会话下的「上下文占用」细条：点阵半透明填充（与存活条同样式，肉眼一片淡灰）。
+// ctx 是每帧一个定值、无惯性，故不像 CPU/MEM 那样有快/慢拖影。条在左，百分比数字紧贴条右侧。
 // 调用方需保证 pct>=0（-1=未知的会话不画本条）。
 static void drawCtxBar(int x, int y, int w, int h, int pct) {
   int p = pct < 0 ? 0 : pct > 100 ? 100 : pct;
   u8g2->drawFrame(x, y, w, h);
   int inner = w - 2;
   int fill = inner * p / 100;
-  if (fill > 0) u8g2->drawBox(x + 1, y + 1, fill, h - 2);
+  if (fill > 0) drawHalftoneBox(x + 1, y + 1, fill, h - 2);  // 点阵半透明，与存活条一致
   char s[8];
   snprintf(s, sizeof(s), "%d%%", p);
   u8g2->setFont(u8g2_font_6x10_tf);      // 小字号，别和会话文字抢高度
@@ -219,7 +219,8 @@ static void drawCtxBar(int x, int y, int w, int h, int pct) {
 
 // 每条会话的「剩余存活」条＝消失倒计时：本条超过 recentSec 未活动就会从列表消失，
 // 满=刚活动过、空=即将消失。画在 ctx 条右侧、同一行（不占额外垂直空间），
-// 用点阵半透明填充（drawHalftoneBox）与实心的 ctx 条区分开——点阵的"淡"也正好呼应"正在消退"。
+// 用点阵半透明填充（drawHalftoneBox），与 ctx 条同样式——点阵的"淡"也正好呼应"正在消退"。
+// 与 ctx 条靠位置区分（本条在右 x=190、无数字；ctx 在左 x=26、条右带百分比）。
 // 不画百分比数字：同一行已有 ctx 的数字，再加一个易混；条本身足够表达倒计时。
 // 调用方需保证 pct>=0（-1=PC 未下发，不画）。
 static void drawLifeBar(int x, int y, int w, int h, int pct) {
@@ -360,7 +361,7 @@ static void render() {
 
   // ── 会话列表 y=82..300（字大优先，每条 ~54px，约显 4 条）──
   int y = 82;
-  const int ROW_H = 54;   // 每条：标题行(16px) + meta 行(16px) + 上下文条(8px) + 间距
+  const int ROW_H = 54;   // 每条：标题行(16px) + meta 行(12px) + 进度条(8px) + 间距（条已上移，行底留白更宽）
   bool blinkOn = (millis() / 500) % 2 == 0; // WAITING（提问）正显↔反显闪烁节拍
   for (int i = 0; i < g_sessCount; i++) {
     if (y + ROW_H > LCD_H) break; // 放不下就停
@@ -372,21 +373,24 @@ static void render() {
     u8g2->setFont(u8g2_font_wqy16_t_gb2312);
     u8g2->drawUTF8(26, top + 16, s.ti);
 
-    // 行2：项目 · 来源（同样 wqy16，字大优先）。
+    // 行2：项目 · 来源（缩小到 wqy12，比标题小一号；缩小后给底部两条进度条腾出上移空间）。
     // age 秒数不再单列：它已被行3的存活条（消失倒计时）可视化表达，同行留数字反而冗余。
     char meta[160];
     snprintf(meta, sizeof(meta), "%s · %s", s.pj, s.pv);
-    u8g2->drawUTF8(26, top + 38, meta);
+    u8g2->setFont(u8g2_font_wqy12_t_gb2312);
+    u8g2->drawUTF8(26, top + 30, meta);
 
-    // 行3：上下文占用条（仅 Claude 会话有 cx；非 Claude/读不到时 ctx=-1，不画本条）。
-    // 条画在 meta 行下方，8px 高、120px 宽，百分比数字由 drawCtxBar 贴在条右侧（数字尾约到 x≈176）。
-    if (s.ctx >= 0) drawCtxBar(26, top + 42, 120, 8, s.ctx);
+    // 行3：上下文占用条（点阵半透明；仅 Claude 会话有 cx；非 Claude/读不到时 ctx=-1，不画本条）。
+    // 上移到 top+36（原 top+42）：meta 缩小后腾出的空间让进度条不再贴行底。
+    // 8px 高、120px 宽，百分比数字由 drawCtxBar 贴在条右侧（数字尾约到 x≈176）。
+    if (s.ctx >= 0) drawCtxBar(26, top + 36, 120, 8, s.ctx);
 
-    // 行3 同一行右侧：剩余存活条＝消失倒计时（点阵半透明，与实心 ctx 条区分）。
-    // 固定列 x=190（在 ctx 数字之后），宽 190→到 x=380（留 20px 右边距），高 8、与 ctx 条同一 y。
+    // 行3 同一行右侧：剩余存活条＝消失倒计时（点阵半透明，与 ctx 条同样式）。
+    // 二者靠位置区分：ctx 在左（x=26、条右带百分比数字），存活条在右（x=190、无数字）。
+    // 固定列 x=190，宽 190→到 x=380（留 20px 右边距），高 8、与 ctx 条同一 y。
     // 固定列而非紧贴 ctx 尾：让每行的存活条对齐成一竖列，跨行扫读更快；非 Claude 行左侧空着可接受。
     // 不占额外垂直空间——完全落在 ctx 条那一行的空白横向区。
-    if (s.life >= 0) drawLifeBar(190, top + 42, 190, 8, s.life);
+    if (s.life >= 0) drawLifeBar(190, top + 36, 190, 8, s.life);
 
     // 整条反显：判定规则「按会话状态 st」（与图标形态解耦，图标画法日后可改，此规则不受影响）——
     //   WORKING、RECENT/未知兜底 → 恒反显（活跃/近期）
