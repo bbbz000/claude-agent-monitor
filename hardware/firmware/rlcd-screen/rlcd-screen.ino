@@ -4,7 +4,7 @@
 // 从 PC 端 claude-agent-monitor 经串口收「每帧一行 JSON」，渲染成三区面板：
 //   顶栏     ：时钟(PC 下发) · 温湿度(本地 SHTC3) · 电池%(本地 ADC)
 //   指标带   ：CPU% / 内存%（PC 下发，带百分比条）
-//   会话列表 ：状态图标 + 标题 + 项目·来源·age；WAITING 会话边框闪烁提醒
+//   会话列表 ：状态图标 + 标题 + 项目·来源·age；整条按会话状态 st 反显，WAITING（提问）正反显闪烁
 //
 // 协议真相源见 ../../SCREEN_PROTOCOL.md。
 //
@@ -51,7 +51,7 @@ struct Session {
   char pj[80];   // 项目
   char pv[32];   // 来源
   int  age;      // 秒
-  bool waiting;  // 是否等待确认（边框闪烁）
+  bool waiting;  // 是否等待确认（协议 w 字段）。注：反显现按 st 判定，本字段解析后暂未在渲染中读取
   int  ctx;      // 上下文占用%（0..100）；-1=未知（非 Claude/PC 省略了 cx 字段）→ 不显示
   int  life;     // 剩余存活%（0..100）＝消失倒计时；-1=PC 未下发 lf → 不画（正常恒有值）
 };
@@ -361,16 +361,11 @@ static void render() {
   // ── 会话列表 y=82..300（字大优先，每条 ~54px，约显 4 条）──
   int y = 82;
   const int ROW_H = 54;   // 每条：标题行(16px) + meta 行(16px) + 上下文条(8px) + 间距
-  bool blinkOn = (millis() / 500) % 2 == 0; // WAITING 边框闪烁节拍
+  bool blinkOn = (millis() / 500) % 2 == 0; // WAITING（提问）正显↔反显闪烁节拍
   for (int i = 0; i < g_sessCount; i++) {
     if (y + ROW_H > LCD_H) break; // 放不下就停
     Session &s = g_sess[i];
     int top = y;
-
-    // WAITING 边框闪烁：亮的半拍画框
-    if (s.waiting && blinkOn) {
-      u8g2->drawFrame(0, top - 2, LCD_W, ROW_H - 2);
-    }
 
     // 行1：状态图标 + 标题（wqy16 中文）
     drawStateIcon(12, top + 11, s.st);
@@ -392,6 +387,23 @@ static void render() {
     // 固定列而非紧贴 ctx 尾：让每行的存活条对齐成一竖列，跨行扫读更快；非 Claude 行左侧空着可接受。
     // 不占额外垂直空间——完全落在 ctx 条那一行的空白横向区。
     if (s.life >= 0) drawLifeBar(190, top + 42, 190, 8, s.life);
+
+    // 整条反显：判定规则「按会话状态 st」（与图标形态解耦，图标画法日后可改，此规则不受影响）——
+    //   WORKING、RECENT/未知兜底 → 恒反显（活跃/近期）
+    //   DONE                     → 恒正显（不反显）
+    //   WAITING（提问）           → 正显↔反显闪烁（blinkOn 节拍）
+    // 判定纯固件本地——st 本就在帧里，无需 PC 再下发反显标志（状态已足够，标志冗余）。
+    // setDrawColor(2)=XOR 模式，drawBox 盖满整行区域把已画好的像素逐点翻转
+    //（黑↔白，文字/图标/条一并反色而不擦除），完了立刻恢复 setDrawColor(1)。
+    bool invert;
+    if      (!strcmp(s.st, "DONE"))    invert = false;    // DONE：正显（不反显）
+    else if (!strcmp(s.st, "WAITING")) invert = blinkOn;  // 提问：正反显闪烁
+    else                                invert = true;     // WORKING/RECENT/未知：恒反显
+    if (invert) {
+      u8g2->setDrawColor(2);
+      u8g2->drawBox(0, top - 2, LCD_W, ROW_H - 2);
+      u8g2->setDrawColor(1);
+    }
 
     y += ROW_H;
   }

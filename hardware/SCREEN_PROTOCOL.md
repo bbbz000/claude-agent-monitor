@@ -15,7 +15,7 @@ PC 端 `hardware/screen-serial.js`（编码在 `hardware/screen-frame.js`）与�
 一帧 = 一行 JSON 对象 + `\n`。示例：
 
 ```json
-{"t":"14:32","cpu":37,"mem":68,"total":8,"sessions":[{"st":"WORKING","ti":"重构扫描器","pj":"claude-agent-monitor","pv":"Claude Code","age":12,"w":false,"cx":42,"lf":96},{"st":"WAITING","ti":"改协议","pj":"foo","pv":"OpenCode","age":3,"w":true,"lf":99}]}
+{"t":"14:32","cpu":37,"mem":68,"total":8,"sessions":[{"st":"WORKING","ti":"重构扫描器","pj":"claude-agent-monitor","pv":"Claude Code","age":12,"w":false,"cx":42,"lf":96},{"st":"DONE","ti":"改协议","pj":"foo","pv":"OpenCode","age":48,"w":false,"lf":84}]}
 ```
 
 ### 顶层字段
@@ -38,9 +38,20 @@ PC 端 `hardware/screen-serial.js`（编码在 `hardware/screen-frame.js`）与�
 | `pj` | string | 项目名（PC 已截断到 ~24 字） |
 | `pv` | string | 来源可读名，如 `Claude Code` / `OpenCode` |
 | `age` | int | 距今秒数 |
-| `w` | bool | 是否等待你确认（`true` → 固件给该条画**闪烁边框**提醒） |
+| `w` | bool | 是否等待你确认。**固件当前不据此渲染**——WAITING 的正反显闪烁完全由 `st` 判定（见下方「反显」说明）；本字段仍会被解析保留，但暂未参与渲染 |
 | `cx` | int 0-100 | 上下文占用率%（该会话已用掉的上下文窗口比例）。**仅 Claude 会话有**（PC 从 `.jsonl` 最后一条 assistant 的 `usage` 算出）；非 Claude 或读不到时**省略该字段**，固件不显示 |
 | `lf` | int 0-100 | 剩余存活比例%＝消失倒计时。本条超过 `recentSec`（默认 300s）未活动就会被 PC 过滤、从列表消失；`lf=(recentSec-age)/recentSec×100`：满=刚活动过，空=即将消失。**所有会话都有**（PC 恒算出）。固件画在 `cx` 条右侧、**同一行**（不占额外垂直空间），用点阵半透明填充与实心的 `cx` 条区分 |
+
+> **反显无需 PC 字段**：整条会话区域的黑白反显**完全由固件本地按 `st` 判定**（规则见下表，与图标画法相互独立——图标日后改画法不影响反显）（`setDrawColor(2)` XOR 盖满 `(0,top-2,LCD_W,ROW_H-2)`，文字/图标/条一并反色而不擦除）：
+>
+> | `st` | 图标 | 反显 |
+> |------|------|------|
+> | `WORKING` | ● 实心大圆 | **恒反显**（实心=活跃） |
+> | `RECENT` / 未知兜底 | · 实心小点 | **恒反显**（实心=近期） |
+> | `WAITING` | ▶ 三角（提问） | **正显↔反显闪烁**（`blinkOn` ~1Hz） |
+> | `DONE` | ○ 空心圆 | **恒正显**（不反显） |
+>
+> `st` 本就在帧里，固件已用图标表达状态，故不再另设反显标志字段。PC 只管把 `st` 发准即可。
 
 ### 清屏帧（off）
 
@@ -56,10 +67,10 @@ PC 断开/退出前发一帧，让屏幕别定格假状态：
 
 | state | 图标 | 画法 |
 |-------|------|------|
-| WORKING | ● 实心圆 | `drawDisc(r=4)` |
-| WAITING | ▶ 三角 | `drawTriangle`（+ 条目边框闪烁） |
-| DONE | ○ 空心圆 | `drawCircle(r=4)` |
-| RECENT | · 小点 | `drawDisc(r=2)` |
+| WORKING | ● 实心圆 | `drawDisc(r=6)` |
+| WAITING | ▶ 三角 | `drawTriangle`（整条正反显闪烁，见「反显」说明） |
+| DONE | ○ 空心圆 | `drawCircle(r=6)` |
+| RECENT | · 小点 | `drawDisc(r=3)` |
 
 ## 数据来源划分（重要）
 

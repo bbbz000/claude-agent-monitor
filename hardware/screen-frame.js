@@ -13,7 +13,8 @@ const MAX_PROJECT = 24;
 // 默认最多显示几条会话（屏高 300 减去顶栏+指标带，每条 ~2.5 行，约容 6 条）。
 export const DEFAULT_MAX_SESSIONS = 6;
 
-// state 里哪些算“等你确认”，需要在屏幕上闪烁边框提醒。目前只有 WAITING。
+// state 里哪些算“等你确认”。目前只有 WAITING。用于填 w 字段（见下方注释：
+// 固件已改为按 st 本地判定反显/闪烁，w 暂未参与渲染，此字段留作协议完整性/日后备用）。
 function isWaiting(state) {
   return state === "WAITING";
 }
@@ -42,6 +43,8 @@ function slimSession(row) {
   // 剩余存活%（0..100）：距本条因超过 recentSec 未活动被过滤、从列表消失的倒计时。
   // 满=刚活动过，空=即将消失。所有会话都有（scan 恒算出），固件画在 ctx 条右侧、同一行。
   if (row.lifePct != null) s.lf = clampPct(row.lifePct);
+  // 反显不再由 PC 下发标志：整条区域反显完全由固件本地按 st 判定（各状态的反显/闪烁规则见
+  // SCREEN_PROTOCOL.md）。判定留在固件，PC 只管把 st 发准即可。
   return s;
 }
 
