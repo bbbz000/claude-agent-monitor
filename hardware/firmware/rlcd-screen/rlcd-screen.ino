@@ -48,7 +48,7 @@ static size_t lineLen = 0;
 struct Session {
   char st[10];   // 状态
   char ti[96];   // 标题（UTF-8，中文占 3 字节，96 够 ~28 全角字 + 余量）
-  char pj[80];   // 项目
+  char pj[192];  // 项目/路径（PC 截 56 字，中文最坏 3B/字≈168B，取 192 留余量，别在 copyStr 先截掉）
   char pv[32];   // 来源
   int  age;      // 秒
   bool waiting;  // 是否等待确认（协议 w 字段）。注：反显现按 st 判定，本字段解析后暂未在渲染中读取
@@ -362,23 +362,40 @@ static void render() {
   // ── 会话列表 y=82..300（字大优先，每条 ~54px，约显 4 条）──
   int y = 82;
   const int ROW_H = 54;   // 每条：标题行(16px) + meta 行(12px) + 进度条(8px) + 间距（条已上移，行底留白更宽）
+  // 行内横向布局的共享 x（把来源右对齐列与存活条右缘绑成同一个数，保证二者永远对齐）：
+  const int LIFE_X = 190, LIFE_W = 190;   // 存活条(消失倒计时)：左 190、宽 190 → 右缘 380
+  const int SRC_RIGHT = LIFE_X + LIFE_W;  // 来源(pv)右对齐列＝存活条右缘(380)，离屏右框留 20px
   bool blinkOn = (millis() / 500) % 2 == 0; // WAITING（提问）正显↔反显闪烁节拍
   for (int i = 0; i < g_sessCount; i++) {
     if (y + ROW_H > LCD_H) break; // 放不下就停
     Session &s = g_sess[i];
     int top = y;
 
-    // 行1：状态图标 + 标题（wqy16 中文）
+    // 行1：状态图标 + 标题(wqy16)左；来源(pv, wqy12)右对齐到 SRC_RIGHT。
+    // 来源原本在行2，上移到标题行右侧——把整条 meta 行让给路径，路径就能横跨到 SRC_RIGHT(380)，
+    // 比原来（只能用到来源左缘）宽出一大截，显著多显几个字。
     drawStateIcon(12, top + 11, s.st);
-    u8g2->setFont(u8g2_font_wqy16_t_gb2312);
-    u8g2->drawUTF8(26, top + 16, s.ti);
-
-    // 行2：项目 · 来源（缩小到 wqy12，比标题小一号；缩小后给底部两条进度条腾出上移空间）。
-    // age 秒数不再单列：它已被行3的存活条（消失倒计时）可视化表达，同行留数字反而冗余。
-    char meta[160];
-    snprintf(meta, sizeof(meta), "%s · %s", s.pj, s.pv);
+    // 先画来源：右对齐到 SRC_RIGHT=380（与下方存活条右缘同一竖线），得到其左边缘 pvX 给标题让位。
     u8g2->setFont(u8g2_font_wqy12_t_gb2312);
-    u8g2->drawUTF8(26, top + 30, meta);
+    int pvW = u8g2->getUTF8Width(s.pv);
+    int pvX = SRC_RIGHT - pvW;
+    u8g2->drawUTF8(pvX, top + 16, s.pv);       // 与标题同基线(top+16)，wqy12 比标题小一号、底部对齐
+    // 标题：左对齐 x=26，右界让开来源（留 8px），太长用裁剪窗口截断（末尾露半个字＝后面还有）。
+    u8g2->setFont(u8g2_font_wqy16_t_gb2312);
+    int tiRight = pvX - 8;
+    if (tiRight > 26) {
+      u8g2->setClipWindow(26, top, tiRight, top + 18);
+      u8g2->drawUTF8(26, top + 16, s.ti);
+      u8g2->setMaxClipWindow();
+    }
+
+    // 行2：路径(pj)独占整行——来源已移到行1，这里从 x=26 一直用到 SRC_RIGHT(380)，
+    // 横向空间几乎翻倍，能多显不少路径字符。太长仍用裁剪窗口按像素兜底截断（末尾露半个字＝后面还有）。
+    // age 秒数不单列：已被行3的存活条（消失倒计时）可视化表达，同行留数字反而冗余。
+    u8g2->setFont(u8g2_font_wqy12_t_gb2312);
+    u8g2->setClipWindow(26, top + 16, SRC_RIGHT, top + 34);
+    u8g2->drawUTF8(26, top + 30, s.pj);
+    u8g2->setMaxClipWindow();                  // 恢复全屏裁剪，别影响后续绘制
 
     // 行3：上下文占用条（点阵半透明；仅 Claude 会话有 cx；非 Claude/读不到时 ctx=-1，不画本条）。
     // 上移到 top+36（原 top+42）：meta 缩小后腾出的空间让进度条不再贴行底。
@@ -387,10 +404,11 @@ static void render() {
 
     // 行3 同一行右侧：剩余存活条＝消失倒计时（点阵半透明，与 ctx 条同样式）。
     // 二者靠位置区分：ctx 在左（x=26、条右带百分比数字），存活条在右（x=190、无数字）。
-    // 固定列 x=190，宽 190→到 x=380（留 20px 右边距），高 8、与 ctx 条同一 y。
+    // 固定列 LIFE_X=190，宽 LIFE_W=190→到 x=380（留 20px 右边距），高 8、与 ctx 条同一 y。
     // 固定列而非紧贴 ctx 尾：让每行的存活条对齐成一竖列，跨行扫读更快；非 Claude 行左侧空着可接受。
+    // 右缘 LIFE_X+LIFE_W=380 与上方来源(pv)右对齐列 SRC_RIGHT 是同一个数（见 render() 顶部常量），二者永远对齐。
     // 不占额外垂直空间——完全落在 ctx 条那一行的空白横向区。
-    if (s.life >= 0) drawLifeBar(190, top + 36, 190, 8, s.life);
+    if (s.life >= 0) drawLifeBar(LIFE_X, top + 36, LIFE_W, 8, s.life);
 
     // 整条反显：判定规则「按会话状态 st」（与图标形态解耦，图标画法日后可改，此规则不受影响）——
     //   WORKING、RECENT/未知兜底 → 恒反显（活跃/近期）
