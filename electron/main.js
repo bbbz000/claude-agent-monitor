@@ -180,8 +180,10 @@ function createBar() {
 
   barWin.once("ready-to-show", () => {
     positionBar();
-    barWin.showInactive(); // 不抢焦点
-    barWin.moveTop();      // 强制提到最上层
+    if (config.showBar !== false) {  // 关了小条则不显示窗口，但下面照常 tick（外设灯/屏幕不受影响）
+      barWin.showInactive(); // 不抢焦点
+      barWin.moveTop();      // 强制提到最上层
+    }
     pushConfig();
     tick(); // 立即扫一次
     if (DIAG) console.log("[bar] shown. isVisible:", barWin.isVisible(), "bounds:", JSON.stringify(barWin.getBounds()));
@@ -432,6 +434,20 @@ function pushConfig() {
   }
 }
 
+// 按 config.showBar 显隐桌面小条窗（不影响扫描循环与外设灯/屏幕板驱动）。
+// 关时也顺手收起可能正显的悬停气泡，别让它孤零零留在桌面。
+function syncBarVisibility() {
+  if (!barWin || barWin.isDestroyed()) return;
+  if (config.showBar === false) {
+    hideTip();
+    if (barWin.isVisible()) barWin.hide();
+  } else if (!barWin.isVisible()) {
+    positionBar();          // 隐藏期间显示器/宽度可能变过，显示前先重定位
+    barWin.showInactive();
+    barWin.moveTop();
+  }
+}
+
 // 配置变更后统一处理：存盘 + 重定位 + 重启循环（若 refresh 变） + 下发
 function applyConfig(next, { reposition = true, restartLoop = false } = {}) {
   config = next;
@@ -440,6 +456,7 @@ function applyConfig(next, { reposition = true, restartLoop = false } = {}) {
   if (restartLoop) startScanLoop();
   syncLed();   // 外设灯：按新 config.hardware 建/更新/关
   syncScreen();// 屏幕板：按新 config.screen 建/更新/关
+  syncBarVisibility(); // 小条：按新 config.showBar 显/隐
   pushConfig();
   rebuildMenus();
 }
@@ -473,6 +490,14 @@ function buildMenuTemplate() {
         // 无论开关方向，都把 freePos 钉在当前位置：勾选后可拖、取消后原地锁定
         applyConfig({ ...config, draggable: item.checked, freePos: config.freePos || here });
       },
+    },
+    {
+      label: "显示气泡",
+      type: "checkbox",
+      checked: config.showBar !== false,   // 缺省(旧配置无此字段)视为显示
+      // 桌面悬浮小条（那排圆点）的显隐。关掉整窗隐藏，但扫描/外设灯/屏幕板照常运行。
+      // 不重定位（隐藏时定位无意义，syncBarVisibility 会在重新显示前自行 positionBar）。
+      click: (item) => applyConfig({ ...config, showBar: item.checked }, { reposition: false }),
     },
     { label: "活跃阈值", submenu: thresholdItems },
     { type: "separator" },

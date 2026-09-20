@@ -27,6 +27,8 @@ export function getDefaults() {
     recentSec: 300,
     barBackground: "rgba(0,0,0,0.35)", // 胶囊背景；设为 "transparent" 可关闭
     refreshMs: 2000,
+    showBar: true,                     // 是否显示桌面悬浮小条（用户口中的“气泡”=那排圆点）；
+                                       // false=整窗隐藏（仍继续扫描、驱动外设灯/屏幕板）。右键菜单可切
     hardware: {                        // 外设灯（ESP32-C6 RGB LED）；默认关，不影响纯软件用户
       enabled: false,                  //   总开关
       autoPort: true,                  //   true=按 USB VID(303a) 自动挑串口；false=用下面 port
