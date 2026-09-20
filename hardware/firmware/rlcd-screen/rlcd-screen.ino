@@ -371,7 +371,7 @@ static int drawPillRight(int rightX, int top, const char *text) {
   int pillX = rightX - pillW;
   u8g2->drawRBox(pillX, top + 18 - H, pillW, H, 3);  // 实心圆角底（色1）
   u8g2->setDrawColor(0);                             // 镂空文字：以背景色画字，在实底上留出字形
-  u8g2->drawUTF8(rightX - PAD - w, top + 16, text);
+  u8g2->drawUTF8(rightX - PAD - w, top + 15, text);  // 基线 top+15：在胶囊内比底框视觉居中略上移 1px
   u8g2->setDrawColor(1);
   return pillX;
 }
