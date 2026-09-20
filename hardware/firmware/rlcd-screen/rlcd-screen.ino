@@ -382,12 +382,14 @@ static void render() {
     u8g2->setFont(u8g2_font_wqy12_t_gb2312);
     int pvW = u8g2->getUTF8Width(s.pv);
     const int PV_PAD = 4;                        // 药丸左右内边距
-    const int PV_H   = 16;                       // 药丸高（wqy12 约 12px + 上下留白），基线 top+16 落在其内
+    const int PV_H   = 14;                       // 药丸高（收小一圈）。wqy12 字形约落在基线上方 11px 内，
+                                                 // 底边固定 top+18、高 14 → 顶边 top+4，正好削掉原先偏大的顶部留白，文字更居中。
+    const int PV_TOP = top + 18 - PV_H;          // 药丸顶边（底边锁 top+18，改 PV_H 即整体缩放、底对齐不变）
     int pillW = pvW + PV_PAD * 2;
     int pillX = SRC_RIGHT - pillW;               // 药丸右缘顶到 SRC_RIGHT(380)，与存活条右缘同一竖线
     int pvX   = SRC_RIGHT - PV_PAD - pvW;         // 文字在药丸内右对齐（右侧留 PV_PAD）
     if (s.pv[0]) {                               // 无来源则不画空药丸
-      u8g2->drawRBox(pillX, top + 2, pillW, PV_H, 4); // 实心圆角底（色1）
+      u8g2->drawRBox(pillX, PV_TOP, pillW, PV_H, 3); // 实心圆角底（色1）；半径随高收到 3
       u8g2->setDrawColor(0);                     // 镂空文字：以背景色画字，在实底上留出字形
       u8g2->drawUTF8(pvX, top + 16, s.pv);
       u8g2->setDrawColor(1);
