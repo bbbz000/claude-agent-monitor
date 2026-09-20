@@ -46,7 +46,7 @@ export function scan({
       if (ageSec > recentSec) continue; // 只保留近 recentSec 内活动过的
 
       const meta = safe(() => p.parseMeta(s.file), { title: "(无标题)" });
-      const sig = safe(() => p.parseActivity(s.file, s.size), { activity: "", done: false, waiting: false, ctxPct: null });
+      const sig = safe(() => p.parseActivity(s.file, s.size), { activity: "", done: false, waiting: false, ctxPct: null, model: null });
       const { state, activity } = classify({ ageSec, sig, workingSec });
 
       // 剩余存活%：本条超过 recentSec 未活动就会被上面 `continue` 过滤掉、从列表消失。
@@ -64,6 +64,7 @@ export function scan({
         ageSec,
         activity,
         ctxPct: sig.ctxPct == null ? null : sig.ctxPct,  // 上下文占用%（0..100）；读不到/非 Claude=null
+        model: sig.model || null,                         // 模型短名（如 "Opus 4.8"）；读不到/非 Claude=null
         lifePct,                                          // 剩余存活%（0..100）：距被 recentSec 过滤消失的倒计时
         title: meta.title,
         project: s.project,

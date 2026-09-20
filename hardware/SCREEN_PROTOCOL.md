@@ -15,7 +15,7 @@ PC 端 `hardware/screen-serial.js`（编码在 `hardware/screen-frame.js`）与�
 一帧 = 一行 JSON 对象 + `\n`。示例：
 
 ```json
-{"t":"14:32","cpu":37,"mem":68,"total":8,"sessions":[{"st":"WORKING","ti":"重构扫描器","pj":"claude-agent-monitor","pv":"Claude Code","age":12,"w":false,"cx":42,"lf":96},{"st":"DONE","ti":"改协议","pj":"foo","pv":"OpenCode","age":48,"w":false,"lf":84}]}
+{"t":"14:32","cpu":37,"mem":68,"total":8,"sessions":[{"st":"WORKING","ti":"重构扫描器","pj":"claude-agent-monitor","pv":"Claude Code","md":"Opus 4.8","age":12,"w":false,"cx":42,"lf":96},{"st":"DONE","ti":"改协议","pj":"foo","pv":"OpenCode","age":48,"w":false,"lf":84}]}
 ```
 
 ### 顶层字段
@@ -36,7 +36,8 @@ PC 端 `hardware/screen-serial.js`（编码在 `hardware/screen-frame.js`）与�
 | `st` | string | 状态：`WORKING`/`WAITING`/`DONE`/`RECENT` |
 | `ti` | string | 标题（PC 已截断到 ~28 全角字）。固件画在**行1左侧**，右界让开同行右对齐的来源 `pv`，过长按像素裁剪窗口截断 |
 | `pj` | string | 项目名/路径（PC 已截断到 ~56 字；固件另有像素裁剪窗口按行宽兜底截断）。固件画在**行2**，来源上移到行1后本行独占整宽（x=26→380），比旧布局宽近一倍 |
-| `pv` | string | 来源可读名，如 `Claude Code` / `OpenCode`。固件画在**行1右侧**（右对齐到 x=380，与下方存活条右缘同一竖线），把整条行2让给路径 |
+| `pv` | string | 来源可读名，如 `Claude Code` / `OpenCode`。固件画在**行1右侧**（右对齐到 x=380，与下方存活条右缘同一竖线，套圆角药丸背景），把整条行2让给路径 |
+| `md` | string | 模型短名，如 `Opus 4.8` / `Sonnet 5` / `Haiku 4.5`。**仅 Claude 会话有**（PC 从 `.jsonl` 最后一条 assistant 的 `message.model` 缩写而来）；非 Claude 或读不到时**省略该字段**。固件画在**来源药丸左侧**、另起一枚独立圆角药丸（两枚之间留 6px 间隔），无 `md` 则不画、来源药丸位置不变 |
 | `age` | int | 距今秒数 |
 | `w` | bool | 是否等待你确认。**固件当前不据此渲染**——WAITING 的正反显闪烁完全由 `st` 判定（见下方「反显」说明）；本字段仍会被解析保留，但暂未参与渲染 |
 | `cx` | int 0-100 | 上下文占用率%（该会话已用掉的上下文窗口比例）。**仅 Claude 会话有**（PC 从 `.jsonl` 最后一条 assistant 的 `usage` 算出）；非 Claude 或读不到时**省略该字段**，固件不显示 |

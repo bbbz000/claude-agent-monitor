@@ -102,16 +102,51 @@ function lastCtxPct(lines) {
   return null;
 }
 
+// 把原始模型 ID 缩成屏上胶囊能放下的短名：claude-opus-4-8 → "Opus 4.8"、
+// claude-sonnet-5 → "Sonnet 5"、claude-haiku-4-5-20251001 → "Haiku 4.5"、
+// 旧序 claude-3-5-sonnet-… → "Sonnet 3.5"。不认识的去掉 claude- 前缀原样返回。
+const MODEL_FAMILIES = ["opus", "sonnet", "haiku", "fable"];
+function shortModel(id) {
+  if (!id || typeof id !== "string") return "";
+  let s = id.trim()
+    .replace(/^claude-/, "")        // 去 claude- 前缀
+    .replace(/\[[^\]]*\]$/, "")     // 去 [1m] 之类括号后缀
+    .replace(/-\d{6,}$/, "");       // 去末尾日期戳 -20251001
+  const parts = s.split("-");
+  const fam = parts.find((p) => MODEL_FAMILIES.includes(p));
+  const nums = parts.filter((p) => /^\d+$/.test(p));   // 版本号碎片，顺序即原串顺序
+  if (fam) {
+    const cap = fam.charAt(0).toUpperCase() + fam.slice(1);
+    return nums.length ? `${cap} ${nums.join(".")}` : cap;   // opus-4-8 → Opus 4.8
+  }
+  return s;   // 非标准命名：去前缀后原样（胶囊里由 PC/固件再兜底截断）
+}
+
+// 从尾部行里，从后往前找第一条带 model 的 assistant 消息，取其模型短名。找不到→null。
+// 与 lastCtxPct 同源（model 与 usage 常在同一条消息上），但独立扫描以免二者不在同一行时漏取。
+function lastModel(lines) {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let o; try { o = JSON.parse(lines[i]); } catch { continue; }
+    if (o.type === "assistant" && o.message && o.message.model) {
+      const m = shortModel(o.message.model);
+      if (m) return m;
+    }
+  }
+  return null;
+}
+
 // 读尾部推断当前处于什么阶段。返回 { activity, done, waiting, ctxPct }
 // ctxPct=当前上下文占用%（0..100），非 Claude/读不到 usage 时为 null。
 // tail 读 32KB（比判活所需的 8KB 大）：最后一轮 assistant 回复可能较长，
 // 读小了会把带 usage 的那行截断成半行 → JSON 解析失败 → 取不到占用率。
 function parseActivityFor(fp, size) {
   let ctxPct = null;
+  let model = null;
   try {
     const lines = readTail(fp, size, 32768).split("\n").filter(Boolean);
     ctxPct = lastCtxPct(lines);
-    const R = (activity, done, waiting) => ({ activity, done, waiting, ctxPct });
+    model = lastModel(lines);
+    const R = (activity, done, waiting) => ({ activity, done, waiting, ctxPct, model });
     // 从后往前找第一条“实质消息”（assistant / user），跳过 last-prompt /
     // custom-title / ai-title / mode 等收尾元数据行——它们常追加在会话末尾，
     // 是“本轮已结束”的信号，而不是还在运行。
@@ -141,7 +176,7 @@ function parseActivityFor(fp, size) {
       }
     }
   } catch {}
-  return { activity: "", done: false, waiting: false, ctxPct };
+  return { activity: "", done: false, waiting: false, ctxPct, model };
 }
 
 // ── 发现会话文件 ─────────────────────────────────────

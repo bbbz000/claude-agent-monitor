@@ -50,6 +50,7 @@ struct Session {
   char ti[96];   // 标题（UTF-8，中文占 3 字节，96 够 ~28 全角字 + 余量）
   char pj[192];  // 项目/路径（PC 截 56 字，中文最坏 3B/字≈168B，取 192 留余量，别在 copyStr 先截掉）
   char pv[32];   // 来源
+  char md[20];   // 模型短名（如 "Opus 4.8"）；空=非 Claude/读不到，不画模型胶囊
   int  age;      // 秒
   bool waiting;  // 是否等待确认（协议 w 字段）。注：反显现按 st 判定，本字段解析后暂未在渲染中读取
   int  ctx;      // 上下文占用%（0..100）；-1=未知（非 Claude/PC 省略了 cx 字段）→ 不显示
@@ -127,6 +128,7 @@ static void parseFrame(const char *json, size_t len) {
     copyStr(d.ti, sizeof(d.ti), s["ti"] | "");
     copyStr(d.pj, sizeof(d.pj), s["pj"] | "");
     copyStr(d.pv, sizeof(d.pv), s["pv"] | "");
+    copyStr(d.md, sizeof(d.md), s["md"] | "");  // 模型短名；PC 省略（非 Claude/读不到）→ 空串，不画模型胶囊
     d.age = s["age"] | 0;
     d.waiting = s["w"] | false;
     d.ctx = s["cx"] | -1;   // PC 省略 cx（非 Claude/读不到）→ -1，渲染时不显示
@@ -356,6 +358,24 @@ static void drawStateIcon(int cx, int cy, const char *st, uint32_t step) {
       u8g2->drawPixel(hx + c, y);
 }
 
+// 画一枚圆角"药丸"标签，右对齐到 rightX：实心圆角底(色1) + 镂空文字(色0)＝选中片效果。
+// 返回药丸左缘 x（供下一枚药丸据此左移排布）；text 为空则不画、原样返回 rightX（不占位）。
+// 字体/高度/圆角统一：wqy12、底边锁 top+18、高 14、半径 3。整行随后按 st 做 XOR 反显时药丸一并翻色。
+// 来源(pv)与模型(md)是两枚独立药丸，都走本函数，样式因此天然一致。
+static int drawPillRight(int rightX, int top, const char *text) {
+  if (!text || !text[0]) return rightX;              // 无内容：不画空药丸，也不占横向位置
+  u8g2->setFont(u8g2_font_wqy12_t_gb2312);
+  const int PAD = 4, H = 14;
+  int w     = u8g2->getUTF8Width(text);
+  int pillW = w + PAD * 2;
+  int pillX = rightX - pillW;
+  u8g2->drawRBox(pillX, top + 18 - H, pillW, H, 3);  // 实心圆角底（色1）
+  u8g2->setDrawColor(0);                             // 镂空文字：以背景色画字，在实底上留出字形
+  u8g2->drawUTF8(rightX - PAD - w, top + 16, text);
+  u8g2->setDrawColor(1);
+  return pillX;
+}
+
 // 小电池图标：外框 + 右侧凸头（正极）+ 按电量比例横向填充。(x,y)=电池"身体"左上角。
 // 单色屏无法用颜色表低电，仅用填充长度表示；数字百分比放在图标左侧给精度。
 static void drawBatteryGlyph(int x, int y, int bw, int bh, int pct) {
@@ -493,28 +513,17 @@ static void render() {
     int slot = iconSlotFor(sessKey(s));        // 按会话身份取动画槽（换行也能找回自己的相位）
     advanceAnim(slot, s);                       // 推进(WORKING/RECENT)或冻结(其余)该会话相位
     drawStateIcon(12, top + 11, s.st, g_anim[slot].step);
-    // 先画来源：右对齐到 SRC_RIGHT=380（与下方存活条右缘同一竖线），外面套一枚圆角"药丸"背景当选中效果。
-    // 单色屏无真 alpha，选中片做法＝实心圆角底＋镂空文字：先 drawRBox 填实心圆角框(色1)，
-    // 再把来源文字以色0"挖空"画在其上，得到实底＋镂空字的选中片。整行随后按 st 做 XOR 反显时，
-    // 这枚片会连同整行一起翻色——正显行是"深底浅字"、反显行是"浅底深字"，两种都仍是醒目的独立标签，观感一致。
-    u8g2->setFont(u8g2_font_wqy12_t_gb2312);
-    int pvW = u8g2->getUTF8Width(s.pv);
-    const int PV_PAD = 4;                        // 药丸左右内边距
-    const int PV_H   = 14;                       // 药丸高（收小一圈）。wqy12 字形约落在基线上方 11px 内，
-                                                 // 底边固定 top+18、高 14 → 顶边 top+4，正好削掉原先偏大的顶部留白，文字更居中。
-    const int PV_TOP = top + 18 - PV_H;          // 药丸顶边（底边锁 top+18，改 PV_H 即整体缩放、底对齐不变）
-    int pillW = pvW + PV_PAD * 2;
-    int pillX = SRC_RIGHT - pillW;               // 药丸右缘顶到 SRC_RIGHT(380)，与存活条右缘同一竖线
-    int pvX   = SRC_RIGHT - PV_PAD - pvW;         // 文字在药丸内右对齐（右侧留 PV_PAD）
-    if (s.pv[0]) {                               // 无来源则不画空药丸
-      u8g2->drawRBox(pillX, PV_TOP, pillW, PV_H, 3); // 实心圆角底（色1）；半径随高收到 3
-      u8g2->setDrawColor(0);                     // 镂空文字：以背景色画字，在实底上留出字形
-      u8g2->drawUTF8(pvX, top + 16, s.pv);
-      u8g2->setDrawColor(1);
-    }
-    // 标题：左对齐 x=26，右界让开药丸（留 8px）；无来源时可用到 SRC_RIGHT。太长用裁剪窗口截断（末尾露半个字＝后面还有）。
+    // 行1右侧：两枚独立圆角药丸——来源(pv)右对齐到 SRC_RIGHT=380（与存活条右缘同一竖线），
+    // 模型(md)紧贴其左再留 PILL_GAP 间隔画第二枚。二者同走 drawPillRight，样式天然一致但各自独立、
+    // 之间留白隔开。整行随后按 st 做 XOR 反显时两枚一并翻色，观感仍是两个醒目独立标签。
+    const int PILL_GAP = 6;                       // 两枚药丸之间的水平间隔
+    int pvPillX  = drawPillRight(SRC_RIGHT, top, s.pv);              // 来源药丸（无来源则返回 SRC_RIGHT，不占位）
+    int mdRight  = (s.pv[0] ? pvPillX - PILL_GAP : SRC_RIGHT);       // 有来源则模型排在其左侧，否则模型顶到最右
+    int mdPillX  = drawPillRight(mdRight, top, s.md);               // 模型药丸（无模型则返回 mdRight，不占位）
+    int pillLeft = (s.md[0] ? mdPillX : (s.pv[0] ? pvPillX : SRC_RIGHT)); // 最左那枚药丸的左缘（标题右界据此让开）
+    // 标题：左对齐 x=26，右界让开最左药丸（留 8px）；两枚都无时可用到 SRC_RIGHT。太长用裁剪窗口截断（末尾露半个字＝后面还有）。
     u8g2->setFont(u8g2_font_wqy16_t_gb2312);
-    int tiRight = (s.pv[0] ? pillX : SRC_RIGHT) - 8;
+    int tiRight = pillLeft - 8;
     if (tiRight > 26) {
       u8g2->setClipWindow(26, top, tiRight, top + 18);
       u8g2->drawUTF8(26, top + 16, s.ti);

@@ -12,6 +12,8 @@ const MAX_TITLE = 28;
 // 横向空间几乎翻倍）。固件还有裁剪窗口按像素兜底截断，故这里放宽到 56：全 ASCII 路径足以填满整行，
 // 中文/混排则由固件像素裁剪兜底。多送几个字符串口成本可忽略，尽量让长路径在屏上多显。
 const MAX_PROJECT = 56;
+// 模型短名字段上限：provider 已缩成 "Opus 4.8" 这类短串，这里只作异常兜底，取 16 足够。
+const MAX_MODEL = 16;
 
 // 默认最多显示几条会话（屏高 300 减去顶栏+指标带，每条 ~2.5 行，约容 6 条）。
 export const DEFAULT_MAX_SESSIONS = 6;
@@ -43,6 +45,9 @@ function slimSession(row) {
   };
   // 上下文占用%（0..100）。null=非 Claude/读不到 usage → 省略该字段省带宽，固件按"未知"不显示。
   if (row.ctxPct != null) s.cx = clampPct(row.ctxPct);
+  // 模型短名（如 "Opus 4.8"）。null/空=非 Claude/读不到 → 省略该字段，固件不画模型胶囊。
+  // 已在 provider 里缩成短名，这里再按字符上限兜底截断，避免异常长串撑爆胶囊。
+  if (row.model) s.md = truncate(row.model, MAX_MODEL);
   // 剩余存活%（0..100）：距本条因超过 recentSec 未活动被过滤、从列表消失的倒计时。
   // 满=刚活动过，空=即将消失。所有会话都有（scan 恒算出），固件画在 ctx 条右侧、同一行。
   if (row.lifePct != null) s.lf = clampPct(row.lifePct);
