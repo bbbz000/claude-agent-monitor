@@ -231,13 +231,129 @@ static void drawLifeBar(int x, int y, int w, int h, int pct) {
   if (fill > 0) drawHalftoneBox(x + 1, y + 1, fill, h - 2);
 }
 
-// 状态图标：用简单几何形区分（单色屏无颜色）
-//   WORKING ●(实心) / WAITING ▶(三角，闪) / DONE ○(空心) / RECENT ·(小点)
-static void drawStateIcon(int cx, int cy, const char *st) {
-  if (!strcmp(st, "WORKING"))      u8g2->drawDisc(cx, cy, 6);
-  else if (!strcmp(st, "WAITING")) u8g2->drawTriangle(cx - 6, cy - 6, cx - 6, cy + 6, cx + 6, cy);
-  else if (!strcmp(st, "DONE"))    u8g2->drawCircle(cx, cy, 6);
-  else                              u8g2->drawDisc(cx, cy, 3); // RECENT / 其它
+// ── 状态图标（march 小方块 + 抖动拖尾）──────────────────
+// 工作中的状态图标是一枚在 16px 框内左右往返（乒乓）的小方块，身后拖一道抖动 streak。
+// 拖尾＝头的「历史位置」marchOffset(step-k)，不是按当前方向凭空生成——故端点掉头时旧轨迹留在来路侧
+// 自然抖散，不会瞬移跳边。淡出用 Bayer 4x4 有序抖动伪造（同 drawHalftoneBox 半透明路子）。
+// 拖尾长度随速度：WORKING(快)长、RECENT(慢)短、DONE/其余(停)无。全程纯 drawPixel，无三角函数。
+static const int      MARCH_BW      = 3;                 // 方块宽（像素列）
+static const int      MARCH_RANGE   = 13;               // 头部左缘可移动幅度（=16px 框宽 - 方块宽 3）
+static const uint32_t MARCH_PERIOD  = 2 * MARCH_RANGE;  // 乒乓往返一整周期的帧数（左到右再回来）
+static const uint32_t WORK_ANIM_MS   = 150;  // WORKING 每帧停留毫秒（调这里改工作中移动速度）
+static const uint32_t RECENT_ANIM_MS = 600;  // RECENT（刚停下）每帧停留毫秒：同样往返，只是更慢
+static const int      WORK_TAIL   = 7;   // WORKING（快）拖尾长
+static const int      RECENT_TAIL = 3;   // RECENT（慢）拖尾短（DONE/其余为 0＝无拖尾）
+
+// ── 每条会话的 march 动画相位（按会话身份存，而非行槽）──────
+// 相位「跟着会话本身走」：PC 端把会话列表重排/插删时，某会话即便换到别的行，
+// 也能从持久表里按身份找回自己的相位接着走，不会因换行被当成新会话而跳回起点。
+// 初相由身份哈希决定（step 从 key%MARCH_PERIOD 起），故多个同时 WORKING 的方块起始位置/相位各异、
+// 不会齐刷刷同步，一眼能对上「哪个方块属于哪条会话」。
+// 推进规则：WORKING 快(WORK_ANIM_MS)、RECENT 慢(RECENT_ANIM_MS)、其余(DONE 等)冻结在最后位置。
+struct IconAnim { uint32_t key, step, stepMs; };  // key=会话身份(0=空槽)，step=当前 march 步进，stepMs=上次推进时刻
+static IconAnim g_anim[MAX_SESS] = {};
+
+static uint32_t hashStr(const char *s) {      // djb2
+  uint32_t h = 5381;
+  for (; *s; s++) h = ((h << 5) + h) + (uint8_t)*s;
+  return h;
+}
+
+// 会话身份键＝标题+项目路径一起哈希（比只用标题更不易撞键：同名不同项目的会话也能各自独立）。
+static uint32_t sessKey(const Session &s) {
+  uint32_t h = hashStr(s.ti);
+  for (const char *p = s.pj; *p; p++) h = ((h << 5) + h) + (uint8_t)*p;
+  return h;
+}
+
+// key 是否属于当前在册的某条会话：回收槽位时用，确保绝不误占仍在册会话的槽。
+static bool isLiveKey(uint32_t key) {
+  for (int i = 0; i < g_sessCount; i++)
+    if (sessKey(g_sess[i]) == key) return true;
+  return false;
+}
+
+// 取会话对应的动画槽：命中身份则沿用（保住相位）；否则占一个空槽或已下线会话的槽，
+// 并用身份哈希做初相。因跳过所有「仍在册会话」的槽，会话重排时不会互相错接相位。
+static int iconSlotFor(uint32_t key) {
+  for (int k = 0; k < MAX_SESS; k++)
+    if (g_anim[k].key == key) return k;                      // 命中：沿用该会话的相位
+  for (int k = 0; k < MAX_SESS; k++)
+    if (g_anim[k].key == 0 || !isLiveKey(g_anim[k].key)) {   // 回收：空槽 / 已下线会话
+      g_anim[k].key    = key;
+      g_anim[k].step   = key % MARCH_PERIOD;                 // 初相取自身份 → 各方块起始位置/相位不同
+      g_anim[k].stepMs = millis();
+      return k;
+    }
+  return 0;                                                  // 兜底（会话数 <= 槽数，正常到不了）
+}
+
+// 推进（或冻结）某槽的 march 相位：WORKING 按 WORK_ANIM_MS 前进、RECENT 按 RECENT_ANIM_MS 前进，
+// 其余状态（DONE 等）冻住不动——工作一停即定格在最后位置。渲染循环里每条会话调一次。
+static void advanceAnim(int slot, const Session &s) {
+  uint32_t stepMs = 0;
+  if      (!strcmp(s.st, "WORKING")) stepMs = WORK_ANIM_MS;
+  else if (!strcmp(s.st, "RECENT"))  stepMs = RECENT_ANIM_MS;
+  if (stepMs == 0) return;                          // 冻结：相位不动
+
+  uint32_t now = millis();
+  if (g_anim[slot].stepMs == 0) g_anim[slot].stepMs = now;
+  uint32_t elapsed = now - g_anim[slot].stepMs;
+  if (elapsed >= stepMs) {                           // 按真实时间推进 N 步（与渲染帧率解耦，节奏恒定）
+    uint32_t adv = elapsed / stepMs;
+    g_anim[slot].step   = (g_anim[slot].step + adv) % MARCH_PERIOD;
+    g_anim[slot].stepMs += adv * stepMs;
+  }
+}
+
+// march 头部左缘偏移（0..MARCH_RANGE）：乒乓三角波，对负 step 也成立——供拖尾取「历史位置」用。
+static int marchOffset(int step) {
+  int period = (int)MARCH_PERIOD;
+  int ph = step % period; if (ph < 0) ph += period;        // 负 step（历史帧）归一到 [0,period)
+  return (ph <= MARCH_RANGE) ? ph : (period - ph);          // 前半程去程、后半程回程
+}
+
+// Bayer 4x4 有序抖动阈值表（0..15）：按屏幕坐标取阈值，值越小越"先亮" → 密度可控的伪半透明。
+static const uint8_t BAYER4[4][4] = {
+  {  0,  8,  2, 10 },
+  { 12,  4, 14,  6 },
+  {  3, 11,  1,  9 },
+  { 15,  7, 13,  5 },
+};
+
+// 状态图标（单色屏无颜色，用形状/动画区分）。step=该会话槽 g_anim[slot].step（已推进/冻结）。
+//   WORKING       → march 小方块左右往返 + 长拖尾（动画在跑）
+//   RECENT        → 同样往返但更慢 + 短拖尾
+//   DONE / 其余    → 冻结在最后位置、无拖尾（工作停下即定格成静止方块）
+//   WAITING       → ▶(三角，闪)：语义是「等你回答」，与「停下」不同，保留独立形态
+static void drawStateIcon(int cx, int cy, const char *st, uint32_t step) {
+  if (!strcmp(st, "WAITING")) {
+    u8g2->drawTriangle(cx - 6, cy - 6, cx - 6, cy + 6, cx + 6, cy);
+    return;
+  }
+  int tail = 0;                                  // 拖尾长度随速度：快长、慢短、停无
+  if      (!strcmp(st, "WORKING")) tail = WORK_TAIL;
+  else if (!strcmp(st, "RECENT"))  tail = RECENT_TAIL;
+
+  const int x0   = cx - 8;                        // 16px 框左缘（框 cx-8..cx+7）
+  const int yTop = cy - 4, yBot = cy + 4;         // 方块竖向范围（9px 高，(cx,cy) 居中）
+
+  // 先画拖尾：头的历史位置 marchOffset(step-k)，龄越大密度越低（Bayer 抖动伪造淡出）。
+  // 用历史位置而非「当前方向反向」——端点掉头时旧轨迹留在来路侧自然抖散，不会瞬移跳边。
+  for (int k = tail; k >= 1; k--) {
+    int px = x0 + marchOffset((int)step - k);
+    int dens16 = 16 - 16 * k / (tail + 1);        // k 越大越淡；tail=0 时整段不执行
+    for (int c = 0; c < MARCH_BW; c++) {
+      int x = px + c;
+      for (int y = yTop; y <= yBot; y++)
+        if (BAYER4[y & 3][x & 3] < dens16) u8g2->drawPixel(x, y);
+    }
+  }
+  // 再画实心头盖在拖尾上层（头恒清晰）
+  int hx = x0 + marchOffset((int)step);
+  for (int c = 0; c < MARCH_BW; c++)
+    for (int y = yTop; y <= yBot; y++)
+      u8g2->drawPixel(hx + c, y);
 }
 
 // 小电池图标：外框 + 右侧凸头（正极）+ 按电量比例横向填充。(x,y)=电池"身体"左上角。
@@ -374,7 +490,9 @@ static void render() {
     // 行1：状态图标 + 标题(wqy16)左；来源(pv, wqy12)右对齐到 SRC_RIGHT。
     // 来源原本在行2，上移到标题行右侧——把整条 meta 行让给路径，路径就能横跨到 SRC_RIGHT(380)，
     // 比原来（只能用到来源左缘）宽出一大截，显著多显几个字。
-    drawStateIcon(12, top + 11, s.st);
+    int slot = iconSlotFor(sessKey(s));        // 按会话身份取动画槽（换行也能找回自己的相位）
+    advanceAnim(slot, s);                       // 推进(WORKING/RECENT)或冻结(其余)该会话相位
+    drawStateIcon(12, top + 11, s.st, g_anim[slot].step);
     // 先画来源：右对齐到 SRC_RIGHT=380（与下方存活条右缘同一竖线），外面套一枚圆角"药丸"背景当选中效果。
     // 单色屏无真 alpha，选中片做法＝实心圆角底＋镂空文字：先 drawRBox 填实心圆角框(色1)，
     // 再把来源文字以色0"挖空"画在其上，得到实底＋镂空字的选中片。整行随后按 st 做 XOR 反显时，
