@@ -8,6 +8,7 @@ import { allProviders, listMeta } from "../core/providers/registry.js";
 import { load, save, resolveDisplay } from "./config.js";
 import { LedSerial } from "../hardware/led-serial.js";
 import { ScreenSerial } from "../hardware/screen-serial.js";
+import { poll as pollVd, get as getVd } from "./virtual-desktops.js";
 import os from "os";
 
 const DIR = import.meta.dirname;
@@ -324,10 +325,14 @@ function sampleMetrics() {
   lastCpu = cur;
   lastMetrics = { cpu, mem };
 
+  // 顺带触发一次虚拟桌面信息的异步刷新（reg query 有子进程开销，不在推帧路径同步阻塞；
+  // poll 刷新缓存，下面 getVd() 读缓存、零延迟）。仅屏幕板启用时才有必要采。
+  if (screenDev) pollVd();
+
   // 把新指标即时推给屏幕（复用上一次扫描的会话列表），让 CPU/内存按 1s 采样节奏刷新，
   // 而不必等 2s 的磁盘扫描 tick。磁盘扫描很重仍保持 refreshMs；指标采样是纯内存操作，
   // 每秒推一帧串口开销可忽略（单帧 300-400B，4KB 接收缓冲足够）。
-  if (screenDev && lastRows) screenDev.push(lastRows, { cpu, mem, t: hhmm(), act: userActive() });
+  if (screenDev && lastRows) screenDev.push(lastRows, { cpu, mem, t: hhmm(), act: userActive(), vd: getVd() });
 }
 
 // ── 扫描 → 只推 state 数组（隐私/性能：不传标题/路径）────
@@ -348,7 +353,7 @@ function tick() {
     // 连接状态变化由 LedSerial 的 onChange 回调驱动 rebuildMenus（跳变发生在 tick 之间，轮询会漏）。
     if (led) led.push(rows);
     // 屏幕板：把完整 rows + 最近系统指标 + 当前时钟编码成 JSON 帧写串口（同样懒连接/不阻塞）。
-    if (screenDev) screenDev.push(rows, { cpu: lastMetrics.cpu, mem: lastMetrics.mem, t: hhmm(), act: userActive() });
+    if (screenDev) screenDev.push(rows, { cpu: lastMetrics.cpu, mem: lastMetrics.mem, t: hhmm(), act: userActive(), vd: getVd() });
     // 圆点单位数变化 → 重算窗口宽度并重定位（右边缘固定）
     const units = dotUnits(states);
     if (units !== lastUnits) {

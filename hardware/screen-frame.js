@@ -74,6 +74,10 @@ export function buildScreenFrame(rows = [], metrics = {}, maxSessions = DEFAULT_
     act: metrics.act ? 1 : 0,   // 用户近期有输入（鼠标/键盘）→ 固件用来唤醒/维持不待机
     sessions,
   };
+  // 虚拟桌面：{c:当前序号(1起), nm:[名字...]}。仅 Windows 读得到时带上（PC 从注册表采样）；
+  // 读不到/非 Windows→省略该字段，固件不画。总数由 nm 数组长度推出，不单送。短键名省串口带宽。
+  const vd = slimVd(metrics.vd);
+  if (vd) frame.vd = vd;
   return JSON.stringify(frame) + "\n";
 }
 
@@ -87,4 +91,27 @@ function clampPct(v) {
   const n = Math.round(Number(v));
   if (!Number.isFinite(n)) return 0;
   return n < 0 ? 0 : n > 100 ? 100 : n;
+}
+
+// 每个桌面名字的字符上限：胶囊按名字宽度自适应，但仍需兜底防异常长名把整行撑爆。
+const MAX_VD_NAME = 10;
+
+// 校验虚拟桌面信息 {current,total,names} → 紧凑 {c,nm:[名字...]}。无效 → null（省略字段，固件不画）。
+// 名字数组为准：总数=nm.length；current 夹到 [1,总数]。名字逐个截断、兜底「桌面N」。
+// 防注册表读到脏数据把固件画花。
+function slimVd(vd) {
+  if (!vd || typeof vd !== "object") return null;
+  const names = Array.isArray(vd.names) ? vd.names : null;
+  const total = names ? names.length : Math.round(Number(vd.total));
+  if (!Number.isFinite(total) || total < 1) return null;
+  let c = Math.round(Number(vd.current));
+  if (!Number.isFinite(c) || c < 1) c = 1;
+  if (c > total) c = total;
+  // 名字：有则逐个截断；缺失/非字符串兜底「桌面N」。无 names 数组时全部兜底。
+  const nm = [];
+  for (let i = 0; i < total; i++) {
+    const raw = names && typeof names[i] === "string" && names[i].trim() ? names[i] : `桌面${i + 1}`;
+    nm.push(truncate(raw, MAX_VD_NAME));
+  }
+  return { c, nm };
 }

@@ -15,7 +15,7 @@ PC 端 `hardware/screen-serial.js`（编码在 `hardware/screen-frame.js`）与�
 一帧 = 一行 JSON 对象 + `\n`。示例：
 
 ```json
-{"t":"14:32","cpu":37,"mem":68,"total":8,"sessions":[{"st":"WORKING","ti":"重构扫描器","pj":"claude-agent-monitor","pv":"Claude Code","md":"Opus 4.8","age":12,"w":false,"cx":42,"lf":96},{"st":"DONE","ti":"改协议","pj":"foo","pv":"OpenCode","age":48,"w":false,"lf":84}]}
+{"t":"14:32","cpu":37,"mem":68,"total":8,"vd":{"c":2,"nm":["AI","构建","娱乐"]},"sessions":[{"st":"WORKING","ti":"重构扫描器","pj":"claude-agent-monitor","pv":"Claude Code","md":"Opus 4.8","age":12,"w":false,"cx":42,"lf":96},{"st":"DONE","ti":"改协议","pj":"foo","pv":"OpenCode","age":48,"w":false,"lf":84}]}
 ```
 
 ### 顶层字段
@@ -27,6 +27,7 @@ PC 端 `hardware/screen-serial.js`（编码在 `hardware/screen-frame.js`）与�
 | `mem` | int 0-100 | 内存使用率百分比 |
 | `total` | int | 会话总数（可能 > `sessions` 长度，固件用来提示 `+N 更多`） |
 | `act` | int 0/1 | 用户近期有输入活动（鼠标/键盘，PC 端 `powerMonitor.getSystemIdleTime()<10s`）。固件视同"有活跃会话"，用于从待机唤醒并维持不待机。省略/0=无活动 |
+| `vd` | object | 虚拟桌面 `{c,nm}`：`c`=当前桌面序号（1 起），`nm`=按桌面顺序的名字数组（改过名的用真实名，未改名的兜底 `桌面N`；名字 PC 已逐个截断，可含中文）。总数=`nm.length`，不单送。**仅 Windows 读得到时有**（PC 从注册表 `Explorer\VirtualDesktops` 采样：`VirtualDesktopIDs` 得顺序/序号，`Desktops\{GUID}\Name` 经 PowerShell UTF-8 得名字）；非 Windows/读不到时**省略该字段**。固件画在顶栏居中：每桌面一枚圆角胶囊、宽度随名字自适应，当前桌面实心底+镂空字、其余空心框。省略/`nm` 空→不画 |
 | `sessions` | array | 会话列表，已按 age 升序（最活跃在前，PC 已排好）。PC 截断到 `maxSessions` 条 |
 
 ### 单条会话（`sessions[]`）

@@ -66,6 +66,12 @@ static float  g_memShown = 0;
 static float  g_cpuShownSlow = 0;  // "慢条"显示值：缓动系数更小、追得更慢，画在快条底层做半透明拖影
 static float  g_memShownSlow = 0;
 static int    g_total = 0;         // 会话总数（可能 > 显示条数）
+// 虚拟桌面：每桌面一个名字胶囊。g_vdCur=当前序号(1起)，0=PC 未下发/读不到 → 不画。
+static const int VD_MAX = 12;      // 最多存/画几个桌面名（够用，防数组越界）
+static const int VD_NAME_MAX = 40; // 单名字节上限（UTF-8，中文占3字节，~10 全角字 + 余量）
+static int    g_vdCur = 0;
+static int    g_vdCount = 0;       // 名字数（=桌面总数）
+static char   g_vdNames[VD_MAX][VD_NAME_MAX];
 static Session g_sess[MAX_SESS];
 static int    g_sessCount = 0;
 static bool   g_off = false;       // PC 要求清屏（off 帧）
@@ -115,6 +121,16 @@ static void parseFrame(const char *json, size_t len) {
   g_cpu = doc["cpu"] | 0;
   g_mem = doc["mem"] | 0;
   g_total = doc["total"] | 0;
+
+  // 虚拟桌面 {c:当前序号(1起), nm:[名字...]}。PC 仅 Windows 读得到时下发；缺省→count 0，不画。
+  g_vdCur = doc["vd"]["c"] | 0;
+  g_vdCount = 0;
+  JsonArrayConst vdnm = doc["vd"]["nm"].as<JsonArrayConst>();
+  for (JsonVariantConst nm : vdnm) {
+    if (g_vdCount >= VD_MAX) break;
+    copyStr(g_vdNames[g_vdCount], VD_NAME_MAX, nm.as<const char*>() ? nm.as<const char*>() : "");
+    g_vdCount++;
+  }
 
   // act=1：PC 端检测到用户近期有输入（鼠标移动/点击/键盘）。等同于"有活跃会话"，
   // 用来把屏幕从待机唤醒、并在你用电脑期间维持不待机。
@@ -376,6 +392,44 @@ static int drawPillRight(int rightX, int top, const char *text) {
   return pillX;
 }
 
+// 顶栏虚拟桌面指示器：一桌面一枚圆角胶囊，胶囊宽度随桌面名字自适应。当前桌面(g_vdCur)
+// 填实底+镂空字，其余桌面空心框+正常字。整组以 centerX 水平居中、midY 竖直居中。
+// 未下发(count 0)则不画。名字用 wqy12（支持中文）。
+static void drawVdIndicator(int centerX, int midY) {
+  if (g_vdCount < 1 || g_vdCur < 1) return;  // PC 未下发/读不到（非 Windows 等）：不画
+  u8g2->setFont(u8g2_font_wqy12_t_gb2312);
+  const int PAD = 5, H = 18, GAP = 5;        // 胶囊内边距/高/间隔（顶栏高 24，竖直占 y=3..21）
+
+  // 第一遍：量每枚胶囊宽度（=名字像素宽+左右内边距），累加求整组总宽。
+  int widths[VD_MAX];
+  int totalW = 0;
+  for (int i = 0; i < g_vdCount; i++) {
+    int tw = u8g2->getUTF8Width(g_vdNames[i][0] ? g_vdNames[i] : "?");
+    widths[i] = tw + PAD * 2;
+    totalW += widths[i];
+    if (i > 0) totalW += GAP;
+  }
+
+  // 第二遍：从居中起点逐枚绘制。
+  int x = centerX - totalW / 2;
+  int y = midY - H / 2;
+  for (int i = 0; i < g_vdCount; i++) {
+    const char *nm = g_vdNames[i][0] ? g_vdNames[i] : "?";
+    int tw = widths[i] - PAD * 2;
+    bool cur = (i + 1 == g_vdCur);
+    if (cur) {
+      u8g2->drawRBox(x, y, widths[i], H, 3);   // 当前桌面：实心圆角底
+      u8g2->setDrawColor(0);                   // 镂空字
+      u8g2->drawUTF8(x + PAD, y + 14, nm);
+      u8g2->setDrawColor(1);
+    } else {
+      u8g2->drawRFrame(x, y, widths[i], H, 3);  // 其余桌面：空心圆角框
+      u8g2->drawUTF8(x + PAD, y + 14, nm);
+    }
+    x += widths[i] + GAP;
+  }
+}
+
 // 小电池图标：外框 + 右侧凸头（正极）+ 按电量比例横向填充。(x,y)=电池"身体"左上角。
 // 单色屏无法用颜色表低电，仅用填充长度表示；数字百分比放在图标左侧给精度。
 static void drawBatteryGlyph(int x, int y, int bw, int bh, int pct) {
@@ -448,16 +502,15 @@ static void render() {
   }
 
   // ── 顶栏 y=0..24 ──
-  // 左：时钟（放大到 10x20）
-  u8g2->setFont(u8g2_font_10x20_tf);
-  u8g2->drawStr(2, 19, g_clock[0] ? g_clock : "--:--");
-  // 中：温湿度
+  // 左：温湿度（不再显示时钟——时钟已从顶栏移除，腾出的左侧空间给温湿度）
   char th[32];
   if (g_thValid) snprintf(th, sizeof(th), "%.1fC %.0f%%", g_temp, g_humi);
   else           snprintf(th, sizeof(th), "--C --%%");
   u8g2->setFont(u8g2_font_8x13_tf);
-  int thw = u8g2->getStrWidth(th);
-  u8g2->drawStr((LCD_W - thw) / 2, 18, th);
+  u8g2->drawStr(2, 18, th);
+  // 中：虚拟桌面指示器 ▭▮▭（以屏幕水平中心 LCD_W/2 居中，顶栏中线 y=12）。
+  // PC 未下发（非 Windows/读不到）时 drawVdIndicator 内部直接返回、不占位、不留空。
+  drawVdIndicator(LCD_W / 2, 12);
   // 右：电池图标 + 百分比（+ 充电闪电）。从最右往左排：[电池][ 87%][⚡]
   // 充电判定：3s 内收到过数据帧 ⇒ USB 接着 PC ⇒ 在充电（无硬件充电脚，只能这样推断）。
   bool charging = (g_lastFrameMs != 0) && (millis() - g_lastFrameMs < 3000);
