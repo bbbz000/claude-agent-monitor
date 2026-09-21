@@ -257,8 +257,11 @@ static void drawLifeBar(int x, int y, int w, int h, int pct) {
 static const int      MARCH_BW      = 3;                 // 方块宽（像素列）
 static const int      MARCH_RANGE   = 13;               // 头部左缘可移动幅度（=16px 框宽 - 方块宽 3）
 static const uint32_t MARCH_PERIOD  = 2 * MARCH_RANGE;  // 乒乓往返一整周期的帧数（左到右再回来）
-static const uint32_t WORK_ANIM_MS   = 150;  // WORKING 每帧停留毫秒（调这里改工作中移动速度）
-static const uint32_t RECENT_ANIM_MS = 600;  // RECENT（刚停下）每帧停留毫秒：同样往返，只是更慢
+// WORKING 每帧停留毫秒随剩余存活%(life)线性缓变：life=100(刚活动过)最快、life=0(即将消失)最慢，
+// 呼应右侧逐渐变空的存活条。两端都比 RECENT(600)快，WORKING 始终看着比"停下"更活跃。调速改这两个。
+static const uint32_t WORK_ANIM_FAST_MS = 120;  // life=100：最快
+static const uint32_t WORK_ANIM_SLOW_MS = 420;  // life=0：最慢
+static const uint32_t RECENT_ANIM_MS    = 600;  // RECENT（刚停下）每帧停留毫秒：同样往返，只是更慢
 static const int      WORK_TAIL   = 7;   // WORKING（快）拖尾长
 static const int      RECENT_TAIL = 3;   // RECENT（慢）拖尾短（DONE/其余为 0＝无拖尾）
 
@@ -267,7 +270,7 @@ static const int      RECENT_TAIL = 3;   // RECENT（慢）拖尾短（DONE/其�
 // 也能从持久表里按身份找回自己的相位接着走，不会因换行被当成新会话而跳回起点。
 // 初相由身份哈希决定（step 从 key%MARCH_PERIOD 起），故多个同时 WORKING 的方块起始位置/相位各异、
 // 不会齐刷刷同步，一眼能对上「哪个方块属于哪条会话」。
-// 推进规则：WORKING 快(WORK_ANIM_MS)、RECENT 慢(RECENT_ANIM_MS)、其余(DONE 等)冻结在最后位置。
+// 推进规则：WORKING 快(速度随 life 缓变)、RECENT 慢(RECENT_ANIM_MS)、其余(DONE 等)冻结在最后位置。
 struct IconAnim { uint32_t key, step, stepMs; };  // key=会话身份(0=空槽)，step=当前 march 步进，stepMs=上次推进时刻
 static IconAnim g_anim[MAX_SESS] = {};
 
@@ -306,11 +309,15 @@ static int iconSlotFor(uint32_t key) {
   return 0;                                                  // 兜底（会话数 <= 槽数，正常到不了）
 }
 
-// 推进（或冻结）某槽的 march 相位：WORKING 按 WORK_ANIM_MS 前进、RECENT 按 RECENT_ANIM_MS 前进，
+// 推进（或冻结）某槽的 march 相位：WORKING 按 life 插值出的步进前进、RECENT 按 RECENT_ANIM_MS 前进，
 // 其余状态（DONE 等）冻住不动——工作一停即定格在最后位置。渲染循环里每条会话调一次。
 static void advanceAnim(int slot, const Session &s) {
   uint32_t stepMs = 0;
-  if      (!strcmp(s.st, "WORKING")) stepMs = WORK_ANIM_MS;
+  if (!strcmp(s.st, "WORKING")) {
+    // 剩余存活%(life)插值：life=100→FAST、life=0→SLOW。life=-1(PC 未下发)兜底取最快。
+    int life = (s.life < 0) ? 100 : (s.life > 100 ? 100 : s.life);
+    stepMs = WORK_ANIM_SLOW_MS - (WORK_ANIM_SLOW_MS - WORK_ANIM_FAST_MS) * (uint32_t)life / 100;
+  }
   else if (!strcmp(s.st, "RECENT"))  stepMs = RECENT_ANIM_MS;
   if (stepMs == 0) return;                          // 冻结：相位不动
 
